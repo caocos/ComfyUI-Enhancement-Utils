@@ -91,8 +91,7 @@ function layoutDisconnectedNodes(nodes, startY, startX = MARGIN) {
 
     for (const node of nodes) {
         if (col >= 5) { x = startX; y += rowH + MARGIN + titleH; rowH = 0; col = 0; }
-        node.pos[0] = x;
-        node.pos[1] = y;
+        node.pos = [x, y];
         x += node.size[0] + MARGIN;
         rowH = Math.max(rowH, node.size[1] + titleH);
         col++;
@@ -135,12 +134,10 @@ function positionSubgraphIO(graph) {
     const IO_GAP = 500;
 
     // Position input IO to the left of all nodes.
-    inputIO.pos[0] = bounds.minX - IO_GAP - inputW;
-    inputIO.pos[1] = centerY - inputH / 2;
+    inputIO.pos = [bounds.minX - IO_GAP - inputW, centerY - inputH / 2];
 
     // Position output IO to the right of all nodes.
-    outputIO.pos[0] = bounds.maxX + IO_GAP;
-    outputIO.pos[1] = centerY - outputH / 2;
+    outputIO.pos = [bounds.maxX + IO_GAP, centerY - outputH / 2];
 
     // Re-layout internal slots after repositioning.
     if (typeof inputIO.arrange === "function") inputIO.arrange();
@@ -152,10 +149,8 @@ function positionSubgraphIO(graph) {
  */
 function shiftSubgraphIO(graph, dx, dy) {
     if (!graph.inputNode || !graph.outputNode) return;
-    graph.inputNode.pos[0] += dx;
-    graph.inputNode.pos[1] += dy;
-    graph.outputNode.pos[0] += dx;
-    graph.outputNode.pos[1] += dy;
+    graph.inputNode.pos = [graph.inputNode.pos[0] + dx, graph.inputNode.pos[1] + dy];
+    graph.outputNode.pos = [graph.outputNode.pos[0] + dx, graph.outputNode.pos[1] + dy];
 }
 
 /**
@@ -187,7 +182,7 @@ function centerGraph(graph) {
     const dx = -center.x;
     const dy = -center.y;
 
-    for (const node of nodes) { node.pos[0] += dx; node.pos[1] += dy; }
+    for (const node of nodes) { node.pos = [node.pos[0] + dx, node.pos[1] + dy]; }
     for (const group of groups) { group.pos = [group.pos[0] + dx, group.pos[1] + dy]; }
     positionSubgraphIO(graph);
 
@@ -225,7 +220,7 @@ async function withPreservedCenter(graph, layoutFn) {
     // Skip if the shift is negligible.
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
 
-    for (const node of nodesAfter) { node.pos[0] += dx; node.pos[1] += dy; }
+    for (const node of nodesAfter) { node.pos = [node.pos[0] + dx, node.pos[1] + dy]; }
     for (const group of graph._groups || []) {
         group.pos = [group.pos[0] + dx, group.pos[1] + dy];
     }
@@ -442,11 +437,11 @@ function floatRightLayout(nodes, graph, nodeIdFilter = null) {
         if (!column) continue;
         let maxW = 100, yOff = MARGIN + titleH;
         for (const node of column) {
-            node.pos[0] = xOffset; node.pos[1] = yOff;
+            node.pos = [xOffset, yOff];
             maxW = Math.max(maxW, node.size[0]);
             yOff += node.size[1] + MARGIN + titleH;
         }
-        for (const node of column) node.pos[0] += maxW - node.size[0];
+        for (const node of column) node.pos = [node.pos[0] + maxW - node.size[0], node.pos[1]];
         xOffset += maxW + MARGIN;
     }
 
@@ -485,8 +480,7 @@ function floatRightLayout(nodes, graph, nodeIdFilter = null) {
         for (const node of column) maxW = Math.max(maxW, node.size[0]);
         let yOff = MARGIN + titleH;
         for (const node of column) {
-            node.pos[0] = xOffset + maxW - node.size[0];
-            node.pos[1] = yOff;
+            node.pos = [xOffset + maxW - node.size[0], yOff];
             yOff += node.size[1] + MARGIN + titleH;
         }
         xOffset += maxW + MARGIN;
@@ -564,7 +558,7 @@ function arrangeFloatRightGroups(graph) {
             const bounds = getNodesBounds(gc);
             const shiftX = padding - bounds.minX;
             const shiftY = padding + gTitleH - bounds.minY;
-            for (const node of gc) { node.pos[0] += shiftX; node.pos[1] += shiftY; }
+            for (const node of gc) { node.pos = [node.pos[0] + shiftX, node.pos[1] + shiftY]; }
 
             if (gd.length > 0) layoutDisconnectedNodes(gd, getGraphBottom(gc), padding);
         } else {
@@ -574,7 +568,7 @@ function arrangeFloatRightGroups(graph) {
         const size = computeGroupSize(group, nodes, padding);
         groupSizes.set(group, size);
 
-        // Store offsets relative to group origin.
+        // Store offsets relative to group origin (reads only, no write).
         for (const node of nodes) {
             node._groupOffsetX = node.pos[0];
             node._groupOffsetY = node.pos[1];
@@ -653,16 +647,14 @@ function arrangeFloatRightGroups(graph) {
                 if (!(group.flags?.pinned || group.pinned)) {
                     for (const node of groupNodesMap.get(group) || []) {
                         if (node._groupOffsetX != null) {
-                            node.pos[0] = x + node._groupOffsetX;
-                            node.pos[1] = yOff + node._groupOffsetY;
+                            node.pos = [x + node._groupOffsetX, yOff + node._groupOffsetY];
                             delete node._groupOffsetX;
                             delete node._groupOffsetY;
                         }
                     }
                 }
             } else {
-                item.node.pos[0] = x;
-                item.node.pos[1] = yOff + titleH;
+                item.node.pos = [x, yOff + titleH];
             }
             yOff += item.height + MARGIN;
         }
@@ -724,8 +716,7 @@ function runDagreLayout(nodes, graphLinks, settings, offsetX = 0, offsetY = 0) {
     for (const node of nodes) {
         const dn = g.node(String(node.id));
         if (!dn) continue;
-        node.pos[0] = dn.x - node.size[0] / 2 + offsetX;
-        node.pos[1] = dn.y - (node.size[1] + titleH) / 2 + titleH + offsetY;
+        node.pos = [dn.x - node.size[0] / 2 + offsetX, dn.y - (node.size[1] + titleH) / 2 + titleH + offsetY];
     }
 
     const info = g.graph();
@@ -790,7 +781,7 @@ function arrangeDagreGroups(graph) {
             runDagreLayout(gc, graph.links, settings);
             const bounds = getNodesBounds(gc);
             const shiftX = padding - bounds.minX, shiftY = padding + gTitleH - bounds.minY;
-            for (const node of gc) { node.pos[0] += shiftX; node.pos[1] += shiftY; }
+            for (const node of gc) { node.pos = [node.pos[0] + shiftX, node.pos[1] + shiftY]; }
             if (gd.length > 0) layoutDisconnectedNodes(gd, getGraphBottom(gc), padding);
         } else {
             layoutDisconnectedNodes(nodes, padding + gTitleH, padding);
@@ -843,8 +834,7 @@ function arrangeDagreGroups(graph) {
         if (!(group.flags?.pinned || group.pinned)) {
             for (const node of groupNodesMap.get(group) || []) {
                 if (node._groupOffsetX != null) {
-                    node.pos[0] = gx + node._groupOffsetX;
-                    node.pos[1] = gy + node._groupOffsetY;
+                    node.pos = [gx + node._groupOffsetX, gy + node._groupOffsetY];
                     delete node._groupOffsetX;
                     delete node._groupOffsetY;
                 }
@@ -855,8 +845,7 @@ function arrangeDagreGroups(graph) {
     for (const node of ungroupedConnected) {
         const dn = topG.node("node_" + node.id);
         if (!dn) continue;
-        node.pos[0] = dn.x - node.size[0] / 2;
-        node.pos[1] = dn.y - (node.size[1] + titleH) / 2 + titleH;
+        node.pos = [dn.x - node.size[0] / 2, dn.y - (node.size[1] + titleH) / 2 + titleH];
     }
 
     const allPositioned = [
@@ -1076,7 +1065,7 @@ async function arrangeELK(graph) {
 
     for (const node of connected) {
         const er = elkMap.get(nodeIdToElk.get(node.id));
-        if (er) { node.pos[0] = er.absX; node.pos[1] = er.absY + titleH; }
+        if (er) { node.pos = [er.absX, er.absY + titleH]; }
     }
 
     if (useGroups) {

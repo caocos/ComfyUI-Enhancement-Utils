@@ -4,6 +4,8 @@ A curated collection of enhancement utilities for ComfyUI, combining and improvi
 
 > **Full Subgraph Support** -- Every feature in this package works inside subgraphs. Graph arrangement, node navigation, execution profiling, and running-node highlights all handle nested subgraphs correctly. None of the original packages these features were drawn from support subgraphs.
 
+> **Nodes 2.0 Compatible** -- Every feature works in both the legacy LiteGraph canvas renderer and the new Nodes 2.0 Vue renderer. Profiling badges, graph arrangement, node navigation, resource monitoring, and all nodes function correctly in either mode.
+
 ## Features
 
 ### Resource Monitor

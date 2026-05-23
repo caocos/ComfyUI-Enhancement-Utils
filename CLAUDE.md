@@ -113,6 +113,9 @@ This is NOT a kitchen-sink package. Features are included because they fill real
 
 Things that caused bugs or required non-obvious solutions:
 
+### Node Position Setter vs Index Mutation
+The Nodes 2.0 Vue renderer tracks node positions via a `pos` setter on `LGraphNode` that routes changes through `layoutStore`. Writing `node.pos = [x, y]` triggers the setter and updates the Vue DOM. Writing `node.pos[0] = x; node.pos[1] = y` mutates the internal `_pos` array directly, **bypassing the setter** -- the Vue renderer never learns the position changed. Always use full array assignment (`node.pos = [x, y]`) for position writes. Reading `node.pos[0]` is fine.
+
 ### ComfyUI Loader Fork
 `NODE_CLASS_MAPPINGS` and `comfy_entrypoint` are mutually exclusive in ComfyUI's node loading code. If `NODE_CLASS_MAPPINGS` exists (even as an empty dict), the V1 path fires and `comfy_entrypoint()` is never called. Only `WEB_DIRECTORY` is processed before the fork.
 
