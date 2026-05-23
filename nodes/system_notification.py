@@ -62,4 +62,4 @@ class SystemNotification(io.ComfyNode):
     def execute(cls, any, message, **kwargs) -> io.NodeOutput:
         # The actual notification is created client-side in systemNotification.js.
         # We send the message and mode so the JS handler can use them.
-        return io.NodeOutput(any, ui={"message": message})
+        return io.NodeOutput(any, ui={"message": [message]})

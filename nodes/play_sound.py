@@ -71,4 +71,4 @@ class PlaySound(io.ComfyNode):
         # The actual sound is played client-side in playSound.js.
         # We return empty UI data to trigger the onExecuted callback,
         # and pass the input through as our output.
-        return io.NodeOutput(any, ui={"played": True})
+        return io.NodeOutput(any, ui={"played": [True]})
