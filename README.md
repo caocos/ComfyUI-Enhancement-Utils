@@ -253,23 +253,29 @@ ComfyUI-Enhancement-Utils/
 │   ├── __init__.py                # Module setup, triggers hooks on import
 │   └── hooks.py                   # Monkey-patches for execution timing
 │
-└── js/                            # Served by ComfyUI (WEB_DIRECTORY = "./js")
-    ├── utils.js                   # Shared subgraph/exec-ID utilities
-    ├── graphArrange.js            # Graph layout algorithms + menu
-    ├── nodeNavigation.js          # Go to Node, Follow Execution
-    ├── nodeProfiler.js            # Execution time badges + live timer
-    ├── playSound.js               # PlaySound client handler
-    ├── systemNotification.js      # Browser Notification handler
-    ├── resourceMonitor.js         # Monitor UI (bars, settings, cost tracking)
-    ├── resourceMonitorGraph.js    # Historical graph popup (Canvas 2D)
-    ├── resourceMonitor.css        # Monitor + popup + context menu styling
-    ├── assets/notify.mp3          # Default notification sound
-    └── lib/
+├── src/                           # Build source (not served by ComfyUI)
+│   ├── nodeProfilerBadge.ts       # Vue-aware profiler badge (Nodes 2.0 compatible)
+│   ├── vite.config.ts             # Vite build config
+│   └── package.json               # Build dependencies
+│
+    └── js/                            # Served by ComfyUI (WEB_DIRECTORY = "./js")
+        ├── utils.js                   # Shared subgraph/exec-ID utilities
+        ├── graphArrange.js            # Graph layout algorithms + menu
+        ├── nodeNavigation.js          # Go to Node, Follow Execution
+        ├── nodeProfiler.js            # Execution time badges (both renderers)
+        ├── playSound.js               # PlaySound client handler
+        ├── systemNotification.js      # Browser Notification handler
+        ├── resourceMonitor.js         # Monitor UI (bars, settings, cost tracking)
+        ├── resourceMonitorGraph.js    # Historical graph popup (Canvas 2D)
+        ├── resourceMonitor.css        # Monitor + popup + context menu styling
+        ├── assets/notify.mp3          # Default notification sound
+        ├── built/                     # Vite build output (for future use)
+        └── lib/
         ├── dagre.min.js           # Vendored dagre library
         └── elk.bundled.min.js     # Vendored ELK library
 ```
 
-All Python nodes use the **V3 schema** (`comfy_api.latest`) with `io.ComfyNode`, `define_schema()`, and `io.NodeOutput`. Frontend extensions are plain JavaScript (no build step).
+All Python nodes use the **V3 schema** (`comfy_api.latest`) with `io.ComfyNode`, `define_schema()`, and `io.NodeOutput`. Most frontend extensions are plain JavaScript (no build step). Extensions requiring Vue reactivity for Nodes 2.0 compatibility are built from TypeScript source in `src/` using Vite.
 
 ---
 

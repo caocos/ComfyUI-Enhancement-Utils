@@ -29,16 +29,32 @@ This is NOT a kitchen-sink package. Features are included because they fill real
 
 ### JavaScript (Frontend Extensions)
 
-- **Plain JavaScript** -- no TypeScript, no build step, no npm
+- **Hybrid approach**: plain JS for most extensions, Vite-built TypeScript for features needing Vue reactivity (Nodes 2.0 compatibility)
 - JS files in `js/` are auto-loaded by ComfyUI via the `WEB_DIRECTORY` setting (recursive `**/*.js` glob)
 - Extensions register with `app.registerExtension({ name: "phazei.ExtensionName", ... })`
-- Import pattern: `import { app } from "../../scripts/app.js"` and `import { api } from "../../scripts/api.js"`
 - Console warnings use prefix: `[EnhancementUtils]`
 - Vendored JS libraries go in `js/lib/` -- they get auto-loaded too (UMD bundles set globals like `window.dagre`, `window.ELK`)
 - CSS is loaded manually via `<link>` tag injection from JS (ComfyUI only auto-loads `.js` files, not `.css`)
 - Shared utilities in `js/utils.js` -- `getUniqueIdFromNode()`, `nodeMatchesUniqueId()`, `findNodeByExecutionId()`, `findNodePath()`
 - Shared graph/history module in `js/resourceMonitorGraph.js` -- exports `MetricHistory` class and popup API (`showGraphPopup`, `showMultiGraphPopup`, `hideGraphPopup`, etc.). Imported by `resourceMonitor.js` via ES module import. Does not register an extension itself.
 - New JS extensions: add to `js/`, follow the `app.registerExtension` pattern
+
+#### Plain JS Extensions (no build step)
+
+- Import pattern: `import { app } from "../../scripts/app.js"` and `import { api } from "../../scripts/api.js"`
+- Hand-written files live directly in `js/`
+
+#### Built Extensions (Vite + Vue)
+
+- Source in `src/`, built output in `js/built/`
+- Used when Vue reactivity is needed (e.g., `node.badges` API for Nodes 2.0)
+- Import pattern: `import { app } from "/scripts/app.js"` (absolute path, externalized by Vite)
+- Import Vue reactivity: `import { ref, computed } from "vue"` (bundled, not externalized)
+- Import shared utils: `import { ... } from "../js/utils.js"` (externalized, resolved at runtime as `../utils.js`)
+- Build: `cd src && npm run build` (output committed to repo)
+- `src/node_modules/` is gitignored
+- Built files are committed so end users don't need a build step
+- Do NOT edit files in `js/built/` directly -- edit the source in `src/`
 
 ### Monitor
 

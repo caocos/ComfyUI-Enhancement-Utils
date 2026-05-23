@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Build tooling (src/ has its own .gitignore for node_modules/)
+src/node_modules/
