@@ -253,7 +253,7 @@ ComfyUI-Enhancement-Utils/
 │   ├── __init__.py                # Module setup, triggers hooks on import
 │   └── hooks.py                   # Monkey-patches for execution timing
 │
-└── web/js/
+└── js/                            # Served by ComfyUI (WEB_DIRECTORY = "./js")
     ├── utils.js                   # Shared subgraph/exec-ID utilities
     ├── graphArrange.js            # Graph layout algorithms + menu
     ├── nodeNavigation.js          # Go to Node, Follow Execution

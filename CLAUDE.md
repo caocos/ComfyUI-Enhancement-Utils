@@ -21,7 +21,7 @@ This is NOT a kitchen-sink package. Features are included because they fill real
 - Do NOT use V1 schema (`NODE_CLASS_MAPPINGS`, `INPUT_TYPES` dict) for new nodes
 - Do NOT use Nodes 2.0 -- that's a separate, unrelated thing
 - `NODE_CLASS_MAPPINGS` must NOT be present in `__init__.py` -- its presence triggers the V1 code path in ComfyUI's loader (`if/elif` fork in `nodes.py`) and silently blocks the V3 `comfy_entrypoint()`
-- `WEB_DIRECTORY = "./web/js"` tells ComfyUI where to find JS/CSS extensions
+- `WEB_DIRECTORY = "./js"` tells ComfyUI where to find JS/CSS extensions (docs convention)
 - Node IDs are prefixed with `EnhancementUtils_` (e.g., `EnhancementUtils_PlaySound`)
 - Node categories use existing ComfyUI categories (`utils`, `image`), not a custom top-level category
 - Python logging via `logging.getLogger("enhutils.module.name")`
@@ -30,15 +30,15 @@ This is NOT a kitchen-sink package. Features are included because they fill real
 ### JavaScript (Frontend Extensions)
 
 - **Plain JavaScript** -- no TypeScript, no build step, no npm
-- JS files in `web/js/` are auto-loaded by ComfyUI via the `WEB_DIRECTORY` setting (recursive `**/*.js` glob)
+- JS files in `js/` are auto-loaded by ComfyUI via the `WEB_DIRECTORY` setting (recursive `**/*.js` glob)
 - Extensions register with `app.registerExtension({ name: "phazei.ExtensionName", ... })`
 - Import pattern: `import { app } from "../../scripts/app.js"` and `import { api } from "../../scripts/api.js"`
 - Console warnings use prefix: `[EnhancementUtils]`
-- Vendored JS libraries go in `web/js/lib/` -- they get auto-loaded too (UMD bundles set globals like `window.dagre`, `window.ELK`)
+- Vendored JS libraries go in `js/lib/` -- they get auto-loaded too (UMD bundles set globals like `window.dagre`, `window.ELK`)
 - CSS is loaded manually via `<link>` tag injection from JS (ComfyUI only auto-loads `.js` files, not `.css`)
-- Shared utilities in `web/js/utils.js` -- `getUniqueIdFromNode()`, `nodeMatchesUniqueId()`, `findNodeByExecutionId()`, `findNodePath()`
-- Shared graph/history module in `web/js/resourceMonitorGraph.js` -- exports `MetricHistory` class and popup API (`showGraphPopup`, `showMultiGraphPopup`, `hideGraphPopup`, etc.). Imported by `resourceMonitor.js` via ES module import. Does not register an extension itself.
-- New JS extensions: add to `web/js/`, follow the `app.registerExtension` pattern
+- Shared utilities in `js/utils.js` -- `getUniqueIdFromNode()`, `nodeMatchesUniqueId()`, `findNodeByExecutionId()`, `findNodePath()`
+- Shared graph/history module in `js/resourceMonitorGraph.js` -- exports `MetricHistory` class and popup API (`showGraphPopup`, `showMultiGraphPopup`, `hideGraphPopup`, etc.). Imported by `resourceMonitor.js` via ES module import. Does not register an extension itself.
+- New JS extensions: add to `js/`, follow the `app.registerExtension` pattern
 
 ### Monitor
 
@@ -97,7 +97,7 @@ Things that caused bugs or required non-obvious solutions:
 - `app.graph` is always the root graph. `app.canvas.graph` is whatever graph the user is currently viewing (root or subgraph). Always use `app.canvas.graph` for operations that should work inside subgraphs.
 - Subgraph IO nodes (`graph.inputNode` id=-10, `graph.outputNode` id=-20) are NOT in `graph._nodes`. They are separate `Positionable` objects stored directly on the `Subgraph` instance. They must be positioned explicitly after any arrangement.
 - Group membership must be refreshed via `group.recomputeInsideNodes()` before reading `group.nodes` or `group._children` -- the data is stale until this is called.
-- ComfyUI uses three node identifier types: `node.id` (local number), execution ID (`"1:2:3"` colon-delimited string for backend/UNIQUE_ID), and locator ID (`"<uuid>:<localId>"` for UI state). Use `getUniqueIdFromNode(node)` from `web/js/utils.js` to reconstruct a node's execution ID at runtime.
+- ComfyUI uses three node identifier types: `node.id` (local number), execution ID (`"1:2:3"` colon-delimited string for backend/UNIQUE_ID), and locator ID (`"<uuid>:<localId>"` for UI state). Use `getUniqueIdFromNode(node)` from `js/utils.js` to reconstruct a node's execution ID at runtime.
 
 ### GPU Monitoring Pitfalls
 - `pynvml` can throw `UnicodeDecodeError` on GPU names (some drivers return non-UTF-8 bytes)
@@ -122,14 +122,14 @@ History lists are appended from the daemon thread and read from HTTP handler thr
 
 1. Create `nodes/my_node.py` using the V3 pattern (see `play_sound.py` for a minimal example)
 2. Import in `nodes/__init__.py` and add to `ALL_NODES`
-3. If it needs client-side JS, add `web/js/myNode.js` with an `app.registerExtension` block
+3. If it needs client-side JS, add `js/myNode.js` with an `app.registerExtension` block
 4. Use `io.MatchType` for wildcard/passthrough inputs (not the old `AnyType(str)` hack)
 5. Use `fingerprint_inputs` returning `float("NaN")` for nodes that must always re-execute
 6. Add `search_aliases` in the schema for discoverability
 
 ### New Arrange Algorithm
 
-1. Add the layout function in `web/js/graphArrange.js`
+1. Add the layout function in `js/graphArrange.js`
 2. Use the shared helpers: `partitionNodes()`, `resolveGroups()`, `getNodesBounds()`, `layoutDisconnectedNodes()`, `positionSubgraphIO()`, `computeGroupSize()`
 3. Wrap the menu callback with `withPreservedCenter()` to preserve the graph's position
 4. Always call `positionSubgraphIO(graph)` before `graph.setDirtyCanvas(true, true)`
@@ -140,10 +140,10 @@ History lists are appended from the daemon thread and read from HTTP handler thr
 1. Add collection logic in `monitor/hardware.py` or `monitor/gpu.py`
 2. Add field to `SystemStats` dataclass and its `to_dict()` method
 3. Add history storage in `collector.py` `_poll_loop()` (append to `self.history[key]`)
-4. Update `web/js/resourceMonitor.js`: create a bar in `setup()`, update it in the WebSocket listener
+4. Update `js/resourceMonitor.js`: create a bar in `setup()`, update it in the WebSocket listener
 5. Register the bar with `registerBarHover()` for graph popup support
 6. Add a toggle setting following the `EnhUtils.Monitor.Show*` pattern
-7. Add a CSS color class in `web/js/resourceMonitor.css`
+7. Add a CSS color class in `js/resourceMonitor.css`
 
 ## Dependencies
 
@@ -154,7 +154,7 @@ History lists are appended from the daemon thread and read from HTTP handler thr
 | `pynvml` | Optional | NVIDIA GPU monitoring -- graceful fallback if missing |
 | `Pillow`, `torch`, `numpy` | Yes | Bundled with ComfyUI |
 
-Vendored JS libraries (in `web/js/lib/`, no npm needed):
+Vendored JS libraries (in `js/lib/`, no npm needed):
 - `dagre.min.js` (0.8.5) -- Sugiyama layout, ~284KB
 - `elk.bundled.min.js` (0.11.1) -- Eclipse Layout Kernel, ~1.5MB
 

@@ -43,5 +43,5 @@ async def comfy_entrypoint() -> EnhancementUtilsExtension:
 # This is processed before the V1/V3 entrypoint fork, so it works with both.
 # NOTE: NODE_CLASS_MAPPINGS is intentionally absent -- its presence would
 # trigger the V1 code path and skip our comfy_entrypoint() entirely.
-WEB_DIRECTORY = "./web/js"
+WEB_DIRECTORY = "./js"
 __all__ = ["WEB_DIRECTORY"]
