@@ -71,15 +71,22 @@ This is NOT a kitchen-sink package. Features are included because they fill real
 
 ### Profiler
 
-- Monkey-patches `execution.execute` and `PromptServer.send_sync` at import time
-- `send_sync` intercept captures `execution_start`, `executing` (node start times), and `executing` with `node=None` (execution end)
-- `execution.execute` wrapper fires after each node to compute elapsed time
-- Handles both sync and async `execution.execute` via `inspect.iscoroutinefunction`
-- Emits `enhutils.profiler.executed` (per-node) and `enhutils.profiler.execution_end` (total) via WebSocket
-- Console summary logged via `logging.getLogger("enhutils.profiler")`
-- Frontend stores profiling data in an external `Map<execId, data>` (not on node objects) so data survives graph/subgraph navigation
-- Subgraph container nodes show aggregated total time of their internal nodes
-- Live elapsed-time counter on the currently executing node (100ms canvas refresh)
+- **Backend** (Python, `profiler/`):
+  - Monkey-patches `execution.execute` and `PromptServer.send_sync` at import time
+  - `send_sync` intercept captures `execution_start`, `executing` (node start times), and `executing` with `node=None` (execution end)
+  - `execution.execute` wrapper fires after each node to compute elapsed time
+  - Handles both sync and async `execution.execute` via `inspect.iscoroutinefunction`
+  - Emits `enhutils.profiler.executed` (per-node) and `enhutils.profiler.execution_end` (total) via WebSocket
+  - Console summary logged via `logging.getLogger("enhutils.profiler")`
+- **Frontend** (plain JS, `js/nodeProfiler.js`):
+  - Uses the `node.badges` API (`LGraphBadge`) -- works on both LiteGraph canvas and Nodes 2.0 Vue renderer
+  - Badge getters do a **live lookup** from the module-level `profilingData` Map every time they are called -- no cached state, no Vue refs
+  - LiteGraph canvas repaints via `setDirtyCanvas()`; Vue updates via **direct DOM manipulation** using `[data-node-id]` selectors to inject badge overlays
+  - **Important**: The `node.badges` API cannot be made reactive from external JS due to three compounding issues: (1) badges array lacks `shallowReactive` + `Object.defineProperty` interception that widgets/inputs/outputs get, (2) bundled Vue refs are invisible to the frontend's reactivity system (dual-runtime problem), (3) `usePartitionedBadges` captures `nodeData` as a closure parameter so even re-extracting VueNodeData doesn't update it. DOM manipulation is the only reliable approach for live badge updates.
+  - Profiling data stored in module-level `Map<execId, data>` (not on node objects) so data survives graph/subgraph navigation and tab switches
+  - Badge getter returns `LGraphBadge({ text: "" })` (invisible) when no data -- never null (both renderers crash on null)
+  - Subgraph container nodes show aggregated total time of their internal nodes
+  - Live elapsed-time counter on the currently executing node (100ms interval updates DOM badges + calls setDirtyCanvas)
 
 ## Code Style
 

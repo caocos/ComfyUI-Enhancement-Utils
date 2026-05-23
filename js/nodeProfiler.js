@@ -1,21 +1,38 @@
 /**
  * Node Profiler extension -- displays execution time badges on nodes.
  *
+ * Uses the LGraphBadge API (node.badges) which works on both the legacy
+ * LiteGraph canvas renderer and the Nodes 2.0 Vue renderer.
+ *
+ * Reactivity strategy:
+ * - Badge getters do a **live lookup** from the module-level profilingData Map
+ *   every time they are called. No cached state on the node, no Vue refs.
+ * - For the LiteGraph canvas renderer: setDirtyCanvas() triggers repaints,
+ *   which calls drawBadges() -> our getter -> live data.
+ * - For the Nodes 2.0 Vue renderer: direct DOM manipulation via
+ *   [data-node-id] selectors. The node.badges API cannot be made
+ *   reactive from external JS (badges array lacks shallowReactive
+ *   treatment, bundled Vue refs are invisible to the frontend's
+ *   reactivity, and usePartitionedBadges captures nodeData as a
+ *   closure). DOM badges are injected as absolutely-positioned divs
+ *   inside the node container.
+ * - Post-execution: one final DOM update per profiled node. After that,
+ *   badge values are static until the next execution clears the data.
+ *
  * Features:
- * - Per-node timing badge drawn above the title bar after execution.
- * - Live elapsed-time counter on the currently executing node.
- * - Full subgraph support: badges display inside subgraphs, and subgraph
- *   container nodes show the aggregated total time of their internal nodes.
- * - Profiling data persists across graph/subgraph navigation (stored externally,
- *   not on node objects) and only clears on the next execution_start.
- * - Configurable via ComfyUI settings (enable/disable, decimal precision).
+ * - Per-node timing badge after execution (e.g. "1.23s" or "456ms").
+ * - Live elapsed-time counter on the currently executing node (100ms tick).
+ * - Full subgraph support: subgraph container nodes show aggregated totals.
+ * - Profiling data persists across graph/subgraph navigation and tab switches
+ *   (stored in module-level Maps, not on node objects).
+ * - Configurable via ComfyUI settings (enable/disable).
  *
  * Based on techniques from comfyui-profiler, ComfyUI-Dev-Utils, and ComfyUI-Easy-Use.
  */
 
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { getUniqueIdFromNode } from "./utils.js";
+import { getUniqueIdFromNode, findNodeByExecutionId } from "./utils.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Settings
@@ -32,7 +49,7 @@ const precision = 2;
 
 /**
  * Per-node timing data, keyed by colon-delimited execution ID (e.g. "5:12:3").
- * Stored externally so data survives graph/subgraph navigation.
+ * Stored externally so data survives graph/subgraph navigation and tab switches.
  *
  * @type {Map<string, {selfTime: number}>}
  *   selfTime is in milliseconds.
@@ -56,31 +73,24 @@ let activeExecId = null;
 /** High-resolution timestamp (performance.now) when the active node started. */
 let activeStartTime = 0;
 
-/** Interval ID for the canvas refresh timer during execution. */
+/** Interval ID for the badge refresh timer during execution. */
 let refreshTimerId = null;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Live Timer Helpers
+// Formatting
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Start a 100ms interval that forces canvas repaints for live badge updates.
+ * Format a time value in milliseconds to a display string.
+ *
+ * @param {number} ms - Time in milliseconds.
+ * @returns {string} Formatted string, e.g. "1.23s" or "456ms".
  */
-function startRefreshTimer() {
-    if (refreshTimerId != null) return;
-    refreshTimerId = setInterval(() => {
-        app.graph.setDirtyCanvas(true, false);
-    }, 100);
-}
-
-/**
- * Stop the canvas refresh timer.
- */
-function stopRefreshTimer() {
-    if (refreshTimerId != null) {
-        clearInterval(refreshTimerId);
-        refreshTimerId = null;
+function formatTime(ms) {
+    if (ms >= 1000) {
+        return (ms / 1000).toFixed(precision) + "s";
     }
+    return Math.round(ms) + "ms";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -114,66 +124,11 @@ function computeSubgraphTotals() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Badge Drawing
+// Badge Text Computation
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Format a time value in milliseconds to a display string.
- *
- * @param {number} ms - Time in milliseconds.
- * @returns {string} Formatted string, e.g. "1.23s" or "456ms".
- */
-function formatTime(ms) {
-    if (ms >= 1000) {
-        return (ms / 1000).toFixed(precision) + "s";
-    }
-    return Math.round(ms) + "ms";
-}
-
-/**
- * Draw a profiling badge above a node's title bar.
- *
- * @param {CanvasRenderingContext2D} ctx - The canvas context.
- * @param {string} text - The text to display (e.g. "1.23s").
- */
-function drawBadge(ctx, text) {
-    if (!text) return;
-
-    const fgColor = LiteGraph.BADGE_FG_COLOR ?? "white";
-    const bgColor = LiteGraph.BADGE_BG_COLOR ?? "#0F1F0F";
-    const px = 6;
-    const py = 4;
-    const titleH = LiteGraph.NODE_TITLE_HEIGHT || 30;
-
-    ctx.save();
-    ctx.font = "12px sans-serif";
-    const metrics = ctx.measureText(text);
-    const badgeW = metrics.width + px * 2;
-    const badgeH = 12 + py * 2;
-
-    // Position above the title bar, with a small gap to match ComfyUI's built-in badges.
-    const gap = 2;
-    const badgeX = 0;
-    const badgeY = -titleH - gap - badgeH;
-
-    ctx.fillStyle = bgColor;
-    ctx.beginPath();
-    if (ctx.roundRect) {
-        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 5);
-    } else {
-        ctx.rect(badgeX, badgeY, badgeW, badgeH);
-    }
-    ctx.fill();
-
-    ctx.fillStyle = fgColor;
-    ctx.textBaseline = "top";
-    ctx.fillText(text, badgeX + px, badgeY + py);
-
-    ctx.restore();
-}
-
-/**
- * Get the profiling display text for a node, if any.
+ * Get the profiling display text for a node via live lookup.
  *
  * Checks (in order):
  * 1. If this node is the currently executing node -> live elapsed time.
@@ -219,7 +174,152 @@ function getProfilingText(node) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Instance-Level Draw Patching
+// Badge Attachment
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Badge colors -- eggplant purple to visually distinguish from other badges. */
+const BADGE_FG = "#FFF";
+const BADGE_BG = "#2B0954";
+
+/**
+ * Create a badge getter function for a node. Returns a new function
+ * reference each time so that splicing it into node.badges triggers
+ * the Vue renderer's reactive proxy.
+ *
+ * The getter does a live lookup via getProfilingText() -- no cached
+ * state, no Vue refs. It always returns the current data from the
+ * module-level profilingData Map.
+ *
+ * @param {Object} node - The LiteGraph node.
+ * @returns {Function} A getter function that returns an LGraphBadge.
+ */
+function makeBadgeGetter(node) {
+    return () => {
+        // In Vue (Nodes 2.0) mode, the DOM overlay handles badge display.
+        // Return empty here to avoid duplicate badges.
+        if (isVueRenderer()) {
+            return new LGraphBadge({ text: "" });
+        }
+        if (!enabled) {
+            return new LGraphBadge({ text: "" });
+        }
+        const text = getProfilingText(node);
+        if (!text) {
+            return new LGraphBadge({ text: "" });
+        }
+        return new LGraphBadge({
+            text,
+            fgColor: BADGE_FG,
+            bgColor: BADGE_BG,
+        });
+    };
+}
+
+/**
+ * Attach a profiler badge getter to a node instance.
+ *
+ * Pushes a getter function onto node.badges and records its index.
+ * The getter does a live lookup from profilingData -- no timing
+ * sensitivity, works correctly whether called during nodeCreated
+ * (before node.graph is set) or after full graph configuration.
+ *
+ * @param {Object} node - The LiteGraph node instance.
+ */
+function attachBadge(node) {
+    if (node._enhutils_profiler_patched) return;
+    node._enhutils_profiler_patched = true;
+
+    node.badges.push(makeBadgeGetter(node));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Vue Reactivity -- DOM Badge Overlay
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Update the profiler badge for a node in the Vue (Nodes 2.0) renderer
+ * by directly manipulating the DOM.
+ *
+ * The node.badges API cannot be made reactive from external JS because:
+ * 1. The badges array lacks the shallowReactive + Object.defineProperty
+ *    interception that widgets/inputs/outputs receive.
+ * 2. Vue refs from a bundled Vue instance are invisible to the frontend's
+ *    Vue reactivity system (dual-runtime problem).
+ * 3. The usePartitionedBadges composable captures nodeData as a closure
+ *    parameter, so even re-extracting VueNodeData doesn't update it.
+ *
+ * Instead, we find the node's DOM element via [data-node-id] and inject
+ * a small absolutely-positioned badge div. This works because the node
+ * container has position:absolute and isolation:isolate.
+ *
+ * @param {Object} node - The LiteGraph node.
+ * @param {string} text - Badge text to display, or "" to hide.
+ */
+function updateDomBadge(node, text) {
+    const nodeEl = document.querySelector(
+        `[data-node-id="${node.id}"]`
+    );
+    if (!nodeEl) return;
+
+    let badge = nodeEl.querySelector(".enhutils-profiler-badge");
+
+    if (!text) {
+        if (badge) badge.style.display = "none";
+        return;
+    }
+
+    if (!badge) {
+        badge = document.createElement("div");
+        badge.className = "enhutils-profiler-badge";
+        badge.style.cssText = [
+            "position: absolute",
+            "bottom: -20px",
+            "right: 8px",
+            "background: #2B0954",
+            "color: #fff",
+            "font-size: 11px",
+            "font-family: sans-serif",
+            "padding: 2px 6px",
+            "border-radius: 4px",
+            "border: 2px solid #BA91EB",
+            "pointer-events: none",
+            "z-index: 10",
+            "line-height: 1.2",
+        ].join(";");
+        nodeEl.appendChild(badge);
+    }
+
+    badge.textContent = text;
+    badge.style.display = "";
+}
+
+/**
+ * Detect whether the Vue (Nodes 2.0) renderer is active by checking
+ * for a Vue-rendered node container in the DOM.
+ *
+ * @returns {boolean} True if Nodes 2.0 is active.
+ */
+function isVueRenderer() {
+    return document.querySelector("[data-node-id]") !== null;
+}
+
+/**
+ * Update a node's badge in both renderers.
+ *
+ * - LiteGraph: setDirtyCanvas triggers drawBadges() which calls the getter.
+ * - Vue: directly updates the DOM badge overlay.
+ *
+ * @param {Object} node - The LiteGraph node.
+ */
+function refreshBadge(node) {
+    if (isVueRenderer()) {
+        const text = enabled ? getProfilingText(node) : "";
+        updateDomBadge(node, text);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Graph Walking
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -236,35 +336,88 @@ function walkGraph(graph, callback) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Live Timer
+// ═══════════════════════════════════════════════════════════════════════════
+
 /**
- * Patch a single node instance's onDrawForeground to draw our profiling badge.
+ * Update badges for all nodes that should be ticking during execution.
+ * Called every 100ms by the refresh timer.
  *
- * Uses instance-level patching (property on the node object itself) so that
- * it takes priority over prototype-level patches from other extensions
- * (e.g. ComfyUI-Easy-Use). In JavaScript's prototype chain, own properties
- * are found before prototype properties, so our draw always runs last.
- *
- * The captured `orig` may be another extension's prototype-level patch --
- * we call it first (so their badge draws), then draw our badge on top with
- * an opaque background, visually replacing theirs.
- *
- * @param {Object} node - The LiteGraph node instance to patch.
+ * - Splices the active node's badge (triggers Vue re-render).
+ * - Splices ancestor subgraph container badges.
+ * - Calls setDirtyCanvas for the LiteGraph canvas renderer.
  */
-function patchNodeDraw(node) {
-    if (node._enhutils_profiler_patched) return;
+function updateLiveBadges() {
+    if (!activeExecId) return;
 
-    const orig = node.onDrawForeground;
-    node.onDrawForeground = function (ctx) {
-        const r = orig?.apply(this, arguments);
+    const useVue = isVueRenderer();
 
-        if (enabled && !this.flags?.collapsed) {
-            const text = getProfilingText(this);
-            if (text) drawBadge(ctx, text);
+    // Update the actively executing node's badge.
+    const activeNode = findNodeByExecutionId(activeExecId);
+    if (activeNode && useVue) {
+        refreshBadge(activeNode);
+    }
+
+    // Update ancestor subgraph container badges.
+    const parts = activeExecId.split(":");
+    if (parts.length > 1) {
+        for (let depth = 1; depth < parts.length; depth++) {
+            const prefix = parts.slice(0, depth).join(":");
+            const containerNode = findNodeByExecutionId(prefix);
+            if (containerNode && useVue) {
+                refreshBadge(containerNode);
+            }
         }
+    }
 
-        return r;
-    };
-    node._enhutils_profiler_patched = true;
+    // Canvas renderer repaint (no-op in Vue mode but harmless).
+    app.graph?.setDirtyCanvas?.(true, false);
+}
+
+/**
+ * Start the 100ms live timer interval.
+ */
+function startRefreshTimer() {
+    if (refreshTimerId != null) return;
+    refreshTimerId = setInterval(updateLiveBadges, 100);
+}
+
+/**
+ * Stop the live timer interval.
+ */
+function stopRefreshTimer() {
+    if (refreshTimerId != null) {
+        clearInterval(refreshTimerId);
+        refreshTimerId = null;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Post-Execution Badge Updates
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * After execution ends, refresh all profiled nodes' badges so the Vue
+ * renderer picks up the final timing values. Also refreshes subgraph
+ * container badges.
+ */
+function refreshAllProfiledBadges() {
+    if (isVueRenderer()) {
+        // Walk all nodes in the current graph and update DOM badges for
+        // any that have profiling data. This catches nodes that weren't
+        // updated during execution (e.g. 0ms nodes, nodes in the current
+        // view that were resolved by exec ID from a different graph level).
+        const currentGraph = app.canvas?.graph ?? app.graph;
+        if (currentGraph) {
+            for (const node of currentGraph.nodes ?? []) {
+                refreshBadge(node);
+            }
+        }
+    }
+
+    // Canvas renderer repaint.
+    app.graph?.setDirtyCanvas?.(true, false);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -283,7 +436,10 @@ app.registerExtension({
             type: "boolean",
             defaultValue: true,
             tooltip: "Show execution time badges on nodes after workflow runs.",
-            onChange(v) { enabled = v; },
+            onChange(v) {
+                enabled = v;
+                app.graph?.setDirtyCanvas?.(true, false);
+            },
         });
 
         // Read initial value from stored settings.
@@ -294,6 +450,22 @@ app.registerExtension({
             // Settings not available yet; defaults are fine.
         }
 
+        // ── Subgraph Navigation Listener ──────────────────────────
+
+        // When the user navigates into or out of a subgraph, the Vue
+        // renderer destroys and recreates node DOM elements. Listen for
+        // the litegraph:set-graph event to re-inject DOM badges.
+        // Use a short delay to ensure Vue has mounted the new node elements.
+        if (app.canvas?.canvas) {
+            app.canvas.canvas.addEventListener("litegraph:set-graph", () => {
+                if (profilingData.size > 0 || subgraphTotals.size > 0) {
+                    setTimeout(() => {
+                        refreshAllProfiledBadges();
+                    }, 50);
+                }
+            });
+        }
+
         // ── WebSocket Listeners ────────────────────────────────────
 
         // Clear profiling data when a new execution starts.
@@ -302,6 +474,11 @@ app.registerExtension({
             subgraphTotals.clear();
             activeExecId = null;
             activeStartTime = 0;
+
+            // Remove all DOM badge overlays from the previous run.
+            for (const el of document.querySelectorAll(".enhutils-profiler-badge")) {
+                el.remove();
+            }
         });
 
         // Track the currently executing node for the live timer.
@@ -330,6 +507,11 @@ app.registerExtension({
 
             profilingData.set(execId, { selfTime: timeMs });
 
+            // Refresh the finished node's badge immediately so it updates
+            // in Vue mode.
+            const node = findNodeByExecutionId(execId);
+            if (node) refreshBadge(node);
+
             // Incrementally update subgraph totals so container nodes
             // show a running total as their children complete.
             const parts = execId.split(":");
@@ -337,36 +519,50 @@ app.registerExtension({
                 const prefix = parts.slice(0, depth).join(":");
                 const current = subgraphTotals.get(prefix) || 0;
                 subgraphTotals.set(prefix, current + timeMs);
+
+                const containerNode = findNodeByExecutionId(prefix);
+                if (containerNode) refreshBadge(containerNode);
             }
         });
 
-        // Execution finished -- compute subgraph aggregates and stop timer.
+        // Execution finished -- compute subgraph aggregates and finalize.
         api.addEventListener("enhutils.profiler.execution_end", () => {
             activeExecId = null;
             activeStartTime = 0;
             stopRefreshTimer();
             computeSubgraphTotals();
-            // Final repaint to show all badges.
-            app.graph.setDirtyCanvas(true, false);
+            refreshAllProfiledBadges();
         });
     },
 
     /**
-     * Patch each newly created node instance to draw the profiling badge.
-     * Instance-level patching ensures we draw last, overriding any
-     * prototype-level patches from other profiling extensions.
+     * Attach a profiler badge getter to each newly created node.
+     * The getter does a live lookup, so it works even before node.graph
+     * is fully wired up (returns "" until the graph is configured).
      *
      * @param {Object} node - The newly created node instance.
      */
-    async nodeCreated(node) {
-        patchNodeDraw(node);
+    nodeCreated(node) {
+        attachBadge(node);
     },
 
     /**
-     * Patch all existing nodes after a graph is loaded from a saved workflow.
-     * Walks into nested subgraphs so badges work at every depth.
+     * Attach badges to all existing nodes after a graph is loaded or
+     * a workflow tab is switched. Walks into nested subgraphs so badges
+     * work at every depth.
+     *
+     * For the Vue renderer, DOM badges need to be re-injected after Vue
+     * has rendered the new node elements. We defer with requestAnimationFrame
+     * to ensure the DOM is ready.
      */
-    async afterConfigureGraph() {
-        walkGraph(app.graph, (node) => patchNodeDraw(node));
+    afterConfigureGraph() {
+        walkGraph(app.graph, (node) => attachBadge(node));
+
+        // Re-inject DOM badges after Vue has rendered.
+        if (profilingData.size > 0 || subgraphTotals.size > 0) {
+            requestAnimationFrame(() => {
+                refreshAllProfiledBadges();
+            });
+        }
     },
 });
