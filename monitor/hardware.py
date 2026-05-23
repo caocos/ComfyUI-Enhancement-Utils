@@ -53,6 +53,8 @@ class SystemStats:
                     "vram_total": g.vram_total,
                     "vram_used": g.vram_used,
                     "vram_used_percent": g.vram_used_percent,
+                    "gpu_power_usage": g.gpu_power_usage,
+                    "gpu_power_limit": g.gpu_power_limit,
                 })
 
         return {

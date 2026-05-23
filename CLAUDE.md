@@ -37,6 +37,7 @@ This is NOT a kitchen-sink package. Features are included because they fill real
 - Vendored JS libraries go in `web/js/lib/` -- they get auto-loaded too (UMD bundles set globals like `window.dagre`, `window.ELK`)
 - CSS is loaded manually via `<link>` tag injection from JS (ComfyUI only auto-loads `.js` files, not `.css`)
 - Shared utilities in `web/js/utils.js` -- `getUniqueIdFromNode()`, `nodeMatchesUniqueId()`, `findNodeByExecutionId()`, `findNodePath()`
+- Shared graph/history module in `web/js/resourceMonitorGraph.js` -- exports `MetricHistory` class and popup API (`showGraphPopup`, `showMultiGraphPopup`, `hideGraphPopup`, etc.). Imported by `resourceMonitor.js` via ES module import. Does not register an extension itself.
 - New JS extensions: add to `web/js/`, follow the `app.registerExtension` pattern
 
 ### Monitor
@@ -47,6 +48,10 @@ This is NOT a kitchen-sink package. Features are included because they fill real
 - HTTP routes registered via `@server.PromptServer.instance.routes.patch(...)` decorators
 - GPU monitoring: `pynvml` is optional, every single pynvml call is wrapped in try/except
 - GPU names decoded with `errors='replace'` (some drivers return non-UTF-8)
+- Power draw via `pynvml.nvmlDeviceGetPowerUsage()` / `nvmlDeviceGetEnforcedPowerLimit()` (milliwatts, divide by 1000)
+- **History** stored in-memory on `MonitorCollector.history` (dict of metric key -> list of `{t, v}` dicts). Survives browser refresh, lost on ComfyUI restart. Endpoints: `GET /enhutils/monitor/history`, `POST /enhutils/monitor/history/clear`
+- **Electricity cost** accumulated server-side as `MonitorCollector.total_watt_seconds` (all GPUs combined). Included in every WS push as `total_watt_seconds`. Reset on history clear.
+- Frontend graph popup in `resourceMonitorGraph.js` -- single chart on hover, multi-chart grid on click (pinned). Uses Canvas 2D, no charting library.
 
 ### Profiler
 
@@ -103,6 +108,8 @@ Things that caused bugs or required non-obvious solutions:
 ### Monitor Threading
 The monitor runs in a daemon thread. Using `asyncio.run()` inside a thread can deadlock with the main server's event loop. Solution: create a dedicated event loop per thread with `asyncio.new_event_loop()`.
 
+History lists are appended from the daemon thread and read from HTTP handler threads. Python's GIL makes `list.append()` and `list(...)` copy thread-safe, so no explicit lock is needed for history access.
+
 ### Image Loading
 - `node_helpers.pillow()` wraps PIL operations to retry with `LOAD_TRUNCATED_IMAGES = True` on failure
 - `folder_paths.filter_files_content_types(files, ["image"])` filters by MIME type, works with relative paths
@@ -132,8 +139,11 @@ The monitor runs in a daemon thread. Using `asyncio.run()` inside a thread can d
 
 1. Add collection logic in `monitor/hardware.py` or `monitor/gpu.py`
 2. Add field to `SystemStats` dataclass and its `to_dict()` method
-3. Update `web/js/resourceMonitor.js`: create a bar in `setup()`, update it in the WebSocket listener
-4. Add a CSS color class in `web/js/resourceMonitor.css`
+3. Add history storage in `collector.py` `_poll_loop()` (append to `self.history[key]`)
+4. Update `web/js/resourceMonitor.js`: create a bar in `setup()`, update it in the WebSocket listener
+5. Register the bar with `registerBarHover()` for graph popup support
+6. Add a toggle setting following the `EnhUtils.Monitor.Show*` pattern
+7. Add a CSS color class in `web/js/resourceMonitor.css`
 
 ## Dependencies
 

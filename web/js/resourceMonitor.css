@@ -2,7 +2,8 @@
  * Resource Monitor - Horizontal Bar Styles
  *
  * The monitor renders as a row of small colored bars in the ComfyUI menu bar,
- * each showing a metric (CPU, RAM, HDD, GPU, VRAM, Temp) as a percentage fill.
+ * each showing a metric (CPU, RAM, HDD, GPU, VRAM, Temp, Power) as a
+ * percentage fill. Hovering a bar shows a historical sparkline graph popup.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Container ──────────────────────────────────────────────────────────── */
@@ -28,7 +29,7 @@
     overflow: hidden;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.20);
-    cursor: default;
+    cursor: pointer;
     /* No fixed height -- inherits from parent via align-items: stretch. */
 }
 
@@ -84,11 +85,76 @@
 
 /* ── Color Themes per Metric ────────────────────────────────────────────── */
 
-.enhutils-monitor.cpu .enhutils-slider  { background: #E8960C; }  /* Amber/Orange */
-.enhutils-monitor.ram .enhutils-slider  { background: #0AA015; }  /* Green */
-.enhutils-monitor.disk .enhutils-slider { background: #6B5B7B; }  /* Muted gray-purple */
-.enhutils-monitor.gpu .enhutils-slider  { background: #0C86F4; }  /* Blue */
-.enhutils-monitor.vram .enhutils-slider { background: #0EA5A5; }  /* Teal */
+.enhutils-monitor.cpu .enhutils-slider   { background: #E8960C; }  /* Amber/Orange */
+.enhutils-monitor.ram .enhutils-slider   { background: #0AA015; }  /* Green */
+.enhutils-monitor.disk .enhutils-slider  { background: #6B5B7B; }  /* Muted gray-purple */
+.enhutils-monitor.gpu .enhutils-slider   { background: #0C86F4; }  /* Blue */
+.enhutils-monitor.vram .enhutils-slider  { background: #0EA5A5; }  /* Teal */
+.enhutils-monitor.power .enhutils-slider { background: #E05020; }  /* Red-orange */
 
 /* Temperature uses a dynamic gradient set inline via JS (green -> red). */
-.enhutils-monitor.temp .enhutils-slider { background: #0AA015; }
+.enhutils-monitor.temp .enhutils-slider  { background: #0AA015; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Historical Graph Popup
+ *
+ * A floating overlay that appears on hover, showing a time-series sparkline
+ * rendered via Canvas 2D. Positioned below the hovered bar by JS.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.enhutils-graph-popup {
+    position: fixed;
+    z-index: 99999;
+    background: rgba(15, 15, 20, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    box-shadow:
+        0 4px 20px rgba(0, 0, 0, 0.5),
+        0 0 1px rgba(255, 255, 255, 0.1);
+    padding: 0;
+    pointer-events: none;  /* Don't interfere with mouse events on bars. */
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    overflow: hidden;
+}
+
+.enhutils-graph-popup canvas {
+    display: block;
+    border-radius: 8px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Right-Click Context Menu
+ *
+ * A minimal context menu shown on right-clicking a monitor bar.
+ * Currently provides a "Clear History" action.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.enhutils-monitor-context-menu {
+    position: fixed;
+    z-index: 100000;
+    background: rgba(20, 20, 28, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.5),
+        0 0 1px rgba(255, 255, 255, 0.1);
+    padding: 4px 0;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    min-width: 140px;
+}
+
+.enhutils-context-item {
+    padding: 6px 14px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    font-family: sans-serif;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.enhutils-context-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}

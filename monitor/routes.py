@@ -6,6 +6,7 @@ Provides endpoints for the frontend to:
 - Start/stop the monitor.
 - Query available GPU and disk devices.
 - Toggle per-GPU metric collection.
+- Retrieve and clear metric history (survives browser refresh).
 
 Registered on PromptServer via aiohttp route decorators.
 """
@@ -118,6 +119,7 @@ async def update_gpu_settings(request: web.Request) -> web.Response:
         utilization (bool): Toggle GPU utilization monitoring.
         vram (bool): Toggle VRAM monitoring.
         temperature (bool): Toggle temperature monitoring.
+        power (bool): Toggle power draw monitoring.
     """
     try:
         idx = int(request.match_info["index"])
@@ -135,5 +137,33 @@ async def update_gpu_settings(request: web.Request) -> web.Response:
         gpu.gpu_vram_enabled[idx] = bool(body["vram"])
     if "temperature" in body:
         gpu.gpu_temperature_enabled[idx] = bool(body["temperature"])
+    if "power" in body:
+        gpu.gpu_power_enabled[idx] = bool(body["power"])
 
+    return web.json_response({"status": "ok"})
+
+
+# ── History Endpoints ───────────────────────────────────────────────────────
+
+@server.PromptServer.instance.routes.get("/enhutils/monitor/history")
+async def get_history(request: web.Request) -> web.Response:
+    """Return stored metric history for graph pre-fill on page load.
+
+    Query params:
+        duration (float, optional): Seconds of history to return.
+            0 or omitted = return all history since last clear / ComfyUI start.
+    """
+    try:
+        duration = float(request.query.get("duration", 0))
+    except (ValueError, TypeError):
+        duration = 0
+
+    data = monitor_instance.get_history(duration)
+    return web.json_response(data)
+
+
+@server.PromptServer.instance.routes.post("/enhutils/monitor/history/clear")
+async def clear_history(_request: web.Request) -> web.Response:
+    """Clear all metric history and reset the electricity cost accumulator."""
+    monitor_instance.clear_history()
     return web.json_response({"status": "ok"})

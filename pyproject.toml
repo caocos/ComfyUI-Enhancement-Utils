@@ -1,7 +1,25 @@
 [project]
 name = "comfyui-enhancement-utils"
-description = "A collection of enhancement utilities for ComfyUI: resource monitor, profiler, image loader with metadata and subfolder support, sound/notification alerts, graph arrangement tools, and node navigation aids."
-version = "0.1.0"
+description = "A curated set of ComfyUI enhancements built on the V3 API with full subgraph support: real-time resource monitor (CPU/RAM/GPU/VRAM/temp), node execution profiler with per-node timing badges, graph auto-layout (Quick/Dagre/ELK), node navigation with Follow Execution, Play Sound, System Notification, and an image loader with subfolder scanning and metadata extraction. A modern, well-organized alternative to ComfyUI-Custom-Scripts and Crystools."
+version = "1.0.0"
+keywords = [
+    "ComfyUI",
+    "ComfyUI-Custom-Scripts",
+    "Crystools",
+    "resource monitor",
+    "GPU monitor",
+    "VRAM monitor",
+    "node profiler",
+    "graph arrange",
+    "graph layout",
+    "ELK",
+    "dagre",
+    "node navigation",
+    "subgraph",
+    "image loader",
+    "utilities",
+    "enhancement",
+]
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
 dependencies = [

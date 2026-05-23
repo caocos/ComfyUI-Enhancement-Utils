@@ -1,7 +1,7 @@
 """
 GPU monitoring abstraction layer.
 
-Provides GPU utilization, VRAM usage, and temperature via pynvml (NVIDIA).
+Provides GPU utilization, VRAM usage, temperature, and power draw via pynvml (NVIDIA).
 Gracefully degrades to a no-op if pynvml is unavailable, the system has no
 NVIDIA GPU, or ZLUDA is detected (AMD GPUs faking CUDA).
 
@@ -31,6 +31,8 @@ class GPUStats:
     vram_total: int = 0
     vram_used: int = 0
     vram_used_percent: float = -1.0
+    gpu_power_usage: float = -1.0   # Current power draw in watts.
+    gpu_power_limit: float = -1.0   # Enforced power limit (TDP) in watts.
 
 
 @dataclass
@@ -57,6 +59,7 @@ class GPUMonitor:
         self.gpu_utilization_enabled: list[bool] = []
         self.gpu_vram_enabled: list[bool] = []
         self.gpu_temperature_enabled: list[bool] = []
+        self.gpu_power_enabled: list[bool] = []
 
         self._init_pynvml()
 
@@ -107,6 +110,7 @@ class GPUMonitor:
                 self.gpu_utilization_enabled.append(True)
                 self.gpu_vram_enabled.append(True)
                 self.gpu_temperature_enabled.append(True)
+                self.gpu_power_enabled.append(True)
 
                 logger.info(f"Monitoring GPU {idx}: {name}")
             except Exception as e:
@@ -205,6 +209,19 @@ class GPUMonitor:
                     )
                 except Exception:
                     stats.gpu_temperature = -1.0
+
+            # Power draw (watts).
+            if self.gpu_power_enabled[i]:
+                try:
+                    power_mw = pynvml.nvmlDeviceGetPowerUsage(handle)
+                    stats.gpu_power_usage = power_mw / 1000.0
+                except Exception:
+                    stats.gpu_power_usage = -1.0
+                try:
+                    limit_mw = pynvml.nvmlDeviceGetEnforcedPowerLimit(handle)
+                    stats.gpu_power_limit = limit_mw / 1000.0
+                except Exception:
+                    stats.gpu_power_limit = -1.0
 
             gpus.append(stats)
 

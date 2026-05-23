@@ -12,22 +12,27 @@ Real-time system stats displayed as horizontal colored bars in the ComfyUI menu 
 
 <img src="docs/images/resource_monitor.png" width="700" alt="Resource monitor bars in menu bar">
 
-| Metric | Color | Details |
+| Metric | Color | Display |
 |--------|-------|---------|
-| **CPU** | Amber | CPU utilization percentage |
-| **RAM** | Green | RAM used / total (tooltip shows bytes) |
-| **Disk** | Muted purple | Disk usage for a selected partition |
-| **GPU** | Blue | GPU utilization percentage (NVIDIA only) |
-| **VRAM** | Teal | VRAM used / total with max-used tracking in tooltip |
-| **Temperature** | Green-to-red gradient | GPU temperature in degrees |
+| **CPU** | Amber | Utilization % |
+| **RAM** | Green | Used / total (tooltip shows bytes) |
+| **Disk** | Muted purple | Usage for a selected partition |
+| **GPU** | Blue | Utilization % (NVIDIA only) |
+| **VRAM** | Teal | Used / total, max-used tracking in tooltip |
+| **Temp** | Green-to-red gradient | GPU temperature in degrees |
+| **Power** | Red-orange | Current wattage (bar fill = % of TDP) |
 
+**Historical graphs** -- hover any bar for a single-metric sparkline popup. Click any bar to pin a grid showing all metrics at once. Click again or click outside to dismiss.
+
+**Electricity cost** -- session power consumption is tracked and displayed on the power bar tooltip and graph popup. Configure your electricity rate and currency symbol in settings.
+
+**History persists through browser refresh** -- data is stored server-side in memory. Choose a display window (5 / 10 / 20 / 30 min, 1 hr, or Unlimited). Right-click the monitor bars to clear history.
 
 **GPU support:**
 - NVIDIA GPUs via optional `pynvml`
 - Graceful fallback if no NVIDIA GPU or `pynvml` not installed
 - Respects `CUDA_VISIBLE_DEVICES` -- only monitors GPUs ComfyUI can use
 - Safe ZLUDA detection (won't crash on AMD GPUs faking CUDA)
-- GPU names decoded safely (no `UnicodeDecodeError` on unusual drivers)
 
 
 ---
@@ -255,8 +260,9 @@ ComfyUI-Enhancement-Utils/
     ├── nodeProfiler.js            # Execution time badges + live timer
     ├── playSound.js               # PlaySound client handler
     ├── systemNotification.js      # Browser Notification handler
-    ├── resourceMonitor.js         # Monitor UI (horizontal bars)
-    ├── resourceMonitor.css        # Monitor styling
+    ├── resourceMonitor.js         # Monitor UI (bars, settings, cost tracking)
+    ├── resourceMonitorGraph.js    # Historical graph popup (Canvas 2D)
+    ├── resourceMonitor.css        # Monitor + popup + context menu styling
     ├── assets/notify.mp3          # Default notification sound
     └── lib/
         ├── dagre.min.js           # Vendored dagre library
