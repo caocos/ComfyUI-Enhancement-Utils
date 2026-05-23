@@ -26,6 +26,9 @@ from .monitor import routes  # noqa: F401
 # Import profiler to install execution-timing hooks.
 from . import profiler  # noqa: F401
 
+# Import middleware to fix subfolder paths in /api/view thumbnail requests.
+from . import middleware  # noqa: F401
+
 
 class EnhancementUtilsExtension(ComfyExtension):
     """Main extension class that registers all Enhancement Utils nodes."""

@@ -220,12 +220,11 @@ These are the custom node packs with JavaScript frontend code that needs attenti
 To make code work on both renderers, you can check which renderer is active:
 
 ```javascript
-// Check if Nodes 2.0 (Vue) renderer is active
-// The setting is available in the settings store
-const isVueRenderer = app.extensionManager?.setting?.get?.('Comfy.UseNewMenu') // or similar
-
-// OR check for the presence of Vue-specific DOM elements
-const isNodes2 = document.querySelector('.lg-node-widgets') !== null
+// Check if Nodes 2.0 (Vue) renderer is active by looking for Vue-rendered node containers.
+// These have a data-node-id attribute that only exists in the Vue renderer.
+function isVueRenderer() {
+    return document.querySelector("[data-node-id]") !== null;
+}
 ```
 
 The safest approach is to write code that **doesn't depend on the renderer** — use only the official extension hooks and avoid prototype patching.
@@ -376,6 +375,113 @@ Any widget type NOT in this list (like `MULTI_BUTTON`) will be wrapped by Widget
 
 ---
 
+## Critical Pitfalls (Learned from Migration Experience)
+
+These issues were discovered during actual migration work and are not obvious from the docs or source alone.
+
+### `setDirtyCanvas()` and `graph.change()` Are No-Ops in Vue Mode
+
+In the LiteGraph canvas renderer, `graph.setDirtyCanvas(true, true)` forces a repaint and `graph.change()` marks the graph as dirty. **Neither of these affects the Vue renderer.** Vue positions, badges, and widgets are driven entirely by Vue's reactivity system (`layoutStore`, reactive props, computed refs). If your extension relies on `setDirtyCanvas()` to trigger visual updates, it will appear to do nothing in Nodes 2.0.
+
+### Node Position: Setter vs Index Mutation
+
+The Vue renderer tracks node positions via a `pos` setter on `LGraphNode` that routes changes through a centralized `layoutStore` (backed by a Yjs CRDT document). The setter triggers a `customRef` which Vue watches to update the DOM `transform: translate(...)`.
+
+```javascript
+// CORRECT: Triggers the pos setter → layoutStore → Vue re-render
+node.pos = [x, y];
+
+// BROKEN in Vue: Mutates the internal _pos array directly, bypasses the setter.
+// LiteGraph canvas will update (on next setDirtyCanvas), but Vue will NOT.
+node.pos[0] = x;
+node.pos[1] = y;
+```
+
+Any extension that programmatically moves nodes (arrange, align, snap-to-grid, etc.) **must** use full array assignment. Reading `node.pos[0]` for calculations is fine.
+
+### Dual Vue Runtime Problem
+
+If you bundle Vue in your extension (via Vite or similar), you get a **separate Vue instance** from the one the frontend uses. Vue's reactivity system is per-instance: a `ref()` created by your bundled Vue is invisible to the frontend's `computed()` and `toValue()`.
+
+This means:
+- `node.badges.push(() => myRef.value)` — the getter will be called, but changing `myRef.value` will NOT trigger the frontend's badge `computed` to re-evaluate. The frontend's `toValue()` calls your function but doesn't track your ref as a dependency.
+- You cannot use Vue `ref()`/`computed()` to drive reactive updates in the frontend's components from an external extension.
+
+**Workarounds:**
+- Use plain getter functions that do live data lookups (no refs). Accept that the getter only fires when the frontend re-evaluates for other reasons.
+- For dynamic updates (like a live timer), use **direct DOM manipulation** via `[data-node-id]` selectors instead of the badges API.
+- For static-after-set data, the getter approach works fine — the value is correct whenever the frontend calls it.
+
+### `node.badges` Array Is Not Fully Reactive
+
+Unlike `node.widgets`, `node.inputs`, and `node.outputs` (which receive `shallowReactive` + `Object.defineProperty` interception), the `node.badges` array is a plain reference captured by `extractVueNodeData`. Mutations to the raw array (push, splice) from external JS do **not** reliably trigger the frontend's Vue reactive proxy.
+
+For badge-like overlays that need dynamic updates, **direct DOM manipulation** is the reliable approach:
+
+```javascript
+// Find a node's DOM element in the Vue renderer
+const nodeEl = document.querySelector(`[data-node-id="${node.id}"]`);
+if (nodeEl) {
+    // The node container is position:absolute with isolation:isolate,
+    // so absolutely-positioned children work.
+    const badge = document.createElement("div");
+    badge.style.cssText = "position:absolute; bottom:-20px; right:8px; ...";
+    badge.textContent = "1.23s";
+    nodeEl.appendChild(badge);
+}
+```
+
+### `nodeCreated` Fires Before `node.graph` Is Set
+
+The `nodeCreated` extension hook fires inside the `LGraphNode` constructor, **before** `graph.add(node)` sets `node.graph`. Any code that needs `node.graph` (e.g., determining if the node is in a subgraph, computing execution IDs) must defer to `afterConfigureGraph` or use a guard:
+
+```javascript
+nodeCreated(node) {
+    // node.graph is null/undefined here!
+    // Do NOT call getUniqueIdFromNode(node) or access node.graph.isRootGraph
+    
+    // Safe: set up data structures, attach badge getters, add widgets
+    node._myExtensionData = {};
+    node.badges.push(myBadgeGetter);
+},
+
+afterConfigureGraph() {
+    // node.graph is fully set here.
+    walkGraph(app.graph, (node) => {
+        // Safe to access node.graph, compute exec IDs, etc.
+    });
+}
+```
+
+### Tab Switching Destroys Node Instances
+
+When the user switches between ComfyUI's workflow tabs (internal tabs, not browser tabs), **all `LGraphNode` instances are destroyed and recreated.** The sequence is:
+1. `LGraph.clear()` — sets `_nodes = []`, old instances become garbage
+2. `LGraph.configure(graphData)` — calls `LiteGraph.createNode()` → `new LGraphNode()` for every node
+3. `nodeCreated` fires for each new node
+4. `afterConfigureGraph` fires after all nodes are created
+
+Any custom properties attached to node instances (e.g., `node._myState`, `node._enhutils_profiler_badge`) are **lost**. Store persistent data in module-level Maps keyed by node ID or execution ID, and re-attach to fresh instances in `nodeCreated` / `afterConfigureGraph`.
+
+### Subgraph Navigation Destroys Vue Components
+
+When the user enters or exits a subgraph, the Vue renderer destroys the current `GraphNodeManager` and creates a new one for the target graph. All Vue node components are unmounted and remounted. If you injected DOM elements (badges, overlays) into node containers, they are destroyed.
+
+Listen for the `litegraph:set-graph` event on `app.canvas.canvas` to detect subgraph navigation and re-inject DOM content after Vue remounts:
+
+```javascript
+app.canvas.canvas.addEventListener("litegraph:set-graph", () => {
+    // Defer to let Vue mount the new node elements
+    setTimeout(() => {
+        // Re-inject DOM badges/overlays here
+    }, 50);
+});
+```
+
+Similarly, `afterConfigureGraph` can use `requestAnimationFrame` to defer DOM manipulation until after Vue has rendered.
+
+---
+
 ## Testing Checklist
 
 After migration, test each node under both renderers:
@@ -388,3 +494,11 @@ After migration, test each node under both renderers:
 6. Toggle Nodes 2.0 OFF
 7. Verify everything still works in legacy mode
 8. Test workflow save/load with mixed renderer usage
+
+### Additional Nodes 2.0-Specific Tests
+
+9. **Programmatic node movement** — If the extension repositions nodes (arrange, align, snap), verify nodes visually move in Vue mode, not just in the data model
+10. **Tab switching** — Run a workflow, switch to a different workflow tab and back. Verify any persistent visual state (badges, overlays) survives the round trip
+11. **Subgraph navigation** — Enter a subgraph, then exit. Verify overlays/badges re-appear on the root graph nodes
+12. **Live updates** — If the extension updates node visuals during execution (progress, timers), verify they tick in Vue mode, not just LiteGraph canvas mode
+13. **DOM cleanup** — If the extension injects DOM elements, verify they are cleaned up when nodes are removed or when switching renderers
