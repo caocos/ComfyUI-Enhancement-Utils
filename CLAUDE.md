@@ -78,6 +78,18 @@ This is NOT a kitchen-sink package. Features are included because they fill real
   - Handles both sync and async `execution.execute` via `inspect.iscoroutinefunction`
   - Emits `enhutils.profiler.executed` (per-node) and `enhutils.profiler.execution_end` (total) via WebSocket
   - Console summary logged via `logging.getLogger("enhutils.profiler")`
+  - Public API: `get_elapsed()`, `get_node_time(exec_id)`, `get_all_times()` in `profiler/hooks.py`
+  - HTTP endpoint: `GET /enhutils/profiler/results` (`profiler/routes.py`) returns `node_times`, `node_classes`, `prompt_id`, `total_elapsed` as JSON
+- **ProfilerTiming node** (`nodes/profiler_timing.py`):
+  - V3 schema node (`EnhancementUtils_ProfilerTiming`) that reads timing data from the profiler
+  - Inline pass-through: `any` (MatchType input) -> `passthrough` (MatchType output), type-matched so downstream nodes see the correct type; guarantees execution ordering
+  - Outputs: `passthrough` (type-matched pass-through), `elapsed` (FLOAT, wall-clock seconds since execution started), and `node_time` (FLOAT, seconds for resolved node(s), summed if multiple)
+  - Inputs: `any` (required MatchType, pass-through), `node_link` (optional ANY, link to measure a node's time), `node_ids` (optional STRING, comma-separated IDs)
+  - `node_link` and `node_ids` are additive -- linked node time + ID-resolved times are summed together
+  - ID resolution: plain IDs resolved relative to current subgraph first, then nested, then root; subgraph container IDs return total of all children
+  - Fully cacheable -- no IS_CHANGED, no NOT_IDEMPOTENT; stale cached results are intentional
+  - Hidden inputs: `UNIQUE_ID` (for subgraph context), `PROMPT` (for link resolution)
+  - Link resolution via PROMPT works for root nodes and legacy group nodes; new-style LiteGraph subgraph ephemeral nodes degrade gracefully (returns 0.0, use `node_ids` instead)
 - **Frontend** (plain JS, `js/nodeProfiler.js`):
   - Uses the `node.badges` API (`LGraphBadge`) -- works on both LiteGraph canvas and Nodes 2.0 Vue renderer
   - Badge getters do a **live lookup** from the module-level `profilingData` Map every time they are called -- no cached state, no Vue refs
@@ -87,6 +99,7 @@ This is NOT a kitchen-sink package. Features are included because they fill real
   - Badge getter returns `LGraphBadge({ text: "" })` (invisible) when no data -- never null (both renderers crash on null)
   - Subgraph container nodes show aggregated total time of their internal nodes
   - Live elapsed-time counter on the currently executing node (100ms interval updates DOM badges + calls setDirtyCanvas)
+  - Badges restored on page refresh by fetching `GET /enhutils/profiler/results` from the backend on setup
 
 ## Code Style
 

@@ -450,6 +450,32 @@ app.registerExtension({
             // Settings not available yet; defaults are fine.
         }
 
+        // ── Restore Badges on Load ────────────────────────────────
+
+        // Fetch profiling results from the backend API so badges survive
+        // page refreshes. The backend retains timing data from the most
+        // recent execution in memory.
+        fetch("/enhutils/profiler/results")
+            .then((res) => res.ok ? res.json() : null)
+            .then((data) => {
+                if (!data || !data.node_times) return;
+                const nodeTimes = data.node_times;
+                if (Object.keys(nodeTimes).length === 0) return;
+
+                for (const [execId, seconds] of Object.entries(nodeTimes)) {
+                    profilingData.set(execId, { selfTime: seconds * 1000 });
+                }
+                computeSubgraphTotals();
+
+                // Defer badge refresh to ensure the graph is fully loaded.
+                requestAnimationFrame(() => {
+                    refreshAllProfiledBadges();
+                });
+            })
+            .catch(() => {
+                // Endpoint not available (older backend); silently ignore.
+            });
+
         // ── Subgraph Navigation Listener ──────────────────────────
 
         // When the user navigates into or out of a subgraph, the Vue

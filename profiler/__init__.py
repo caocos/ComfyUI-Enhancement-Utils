@@ -18,3 +18,4 @@ Based on techniques from:
 """
 
 from .hooks import install_hooks  # noqa: F401 -- triggers monkey-patches on import.
+from . import routes  # noqa: F401 -- registers HTTP API endpoints on import.

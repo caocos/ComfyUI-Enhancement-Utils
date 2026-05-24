@@ -212,3 +212,44 @@ def install_hooks() -> None:
     This exists so that ``profiler/__init__.py`` has an explicit import target,
     making it clear that the import has side effects.
     """
+
+
+def get_elapsed() -> float:
+    """Return seconds elapsed since the current execution started.
+
+    Returns 0.0 if no execution is in progress or has completed.
+    """
+    if _state is None:
+        return 0.0
+    return time.perf_counter() - _state["start_time"]
+
+
+def get_node_time(exec_id: str) -> float:
+    """Return the execution time in seconds for a specific node.
+
+    Args:
+        exec_id: The colon-delimited execution ID (e.g. ``"5:42"``).
+
+    Returns:
+        Elapsed seconds, or 0.0 if the node hasn't been profiled.
+    """
+    if _state is None:
+        return 0.0
+    return _state["node_times"].get(exec_id, 0.0)
+
+
+def get_all_times() -> dict:
+    """Return a copy of all per-node timing data.
+
+    Returns:
+        Dict with keys ``"node_times"`` (exec_id -> seconds),
+        ``"node_classes"`` (exec_id -> class_type), and
+        ``"prompt_id"`` (str).  Empty dicts if no execution has run.
+    """
+    if _state is None:
+        return {"node_times": {}, "node_classes": {}, "prompt_id": ""}
+    return {
+        "node_times": dict(_state["node_times"]),
+        "node_classes": dict(_state["node_classes"]),
+        "prompt_id": _state["prompt_id"],
+    }

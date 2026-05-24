@@ -47,7 +47,7 @@ Displays execution time badges on nodes after a workflow runs.
 
 - **Per-node timing** -- a small badge above each node shows how long it took to execute (e.g., `1.23s` or `456ms`)
 - **Subgraph totals** -- subgraph container nodes show the aggregated time of all their internal nodes, updating live as children complete
-- **Persistent data** -- profiling badges survive navigating into/out of subgraphs and switching between workflows. Data only clears when the workflow is run again.
+- **Persistent data** -- profiling badges survive navigating into/out of subgraphs, switching between workflows, and browser refreshes. Data is retained server-side and restored automatically on page load. Data only clears when the workflow is run again.
 
 Badges also display inside subgraphs:
 
@@ -157,6 +157,34 @@ Sends a browser notification when execution reaches this node. The browser will 
 |--------|------|-------------|
 | passthrough | Same as input | The input value, passed through unchanged. |
 
+### Profiler Timing
+
+Reads execution timing data from the profiler and outputs it as float values. Wire inline via the pass-through to guarantee execution order.
+
+<img src="docs/images/profiler_timing_node.png" width="700" alt="Profiler Timing node wired inline in a workflow">
+
+| Input | Type | Description |
+|-------|------|-------------|
+| any | Any (passthrough) | Connect any output to place this node inline in the workflow. Data passes through unchanged. |
+| node_link | Any (optional) | Connect any output from a node to measure that node's execution time. The data itself is ignored. |
+| node_ids | String (optional) | Comma-separated node IDs to look up (e.g. `43,32:234,54`). Plain IDs resolve relative to the current subgraph first, then root. Subgraph container IDs return the total of all nodes inside. |
+
+| Output | Type | Description |
+|--------|------|-------------|
+| passthrough | Same as input | The `any` input forwarded unchanged (type-matched). |
+| elapsed | Float | Wall-clock seconds since execution started. Unique to each instance based on where it sits in the workflow. |
+| node_time | Float | Execution time in seconds for the resolved node(s). Summed if multiple IDs are provided. Returns 0.0 for cached or unresolved nodes. |
+
+**ID resolution order** (for plain IDs like `54` when the node is inside subgraph `123`):
+1. Same subgraph level: `123:54`
+2. Nested child: `123:*:54`
+3. Root level: `54`
+4. If the resolved ID is a subgraph container, returns the sum of all nodes inside it
+
+Both `node_link` and `node_ids` are additive -- their resolved times are summed together.
+
+---
+
 ### Load Image (With Subfolders)
 
 **Category: image** | **Node: Load Image (With Subfolders)**
@@ -243,7 +271,8 @@ ComfyUI-Enhancement-Utils/
 ├── nodes/
 │   ├── play_sound.py              # PlaySound node
 │   ├── system_notification.py     # SystemNotification node
-│   └── image_load_subfolders.py   # ImageLoadWithSubfolders node
+│   ├── image_load_subfolders.py   # ImageLoadWithSubfolders node
+│   └── profiler_timing.py         # ProfilerTiming node
 │
 ├── monitor/
 │   ├── collector.py               # Background stats polling thread
@@ -253,7 +282,8 @@ ComfyUI-Enhancement-Utils/
 │
 ├── profiler/
 │   ├── __init__.py                # Module setup, triggers hooks on import
-│   └── hooks.py                   # Monkey-patches for execution timing
+│   ├── hooks.py                   # Monkey-patches for execution timing
+│   └── routes.py                  # HTTP API endpoint for profiler results
 │
 ├── src/                           # Build source (not served by ComfyUI)
 │   ├── nodeProfilerBadge.ts       # Vue-aware profiler badge (Nodes 2.0 compatible)
