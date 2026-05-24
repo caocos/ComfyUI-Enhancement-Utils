@@ -55,6 +55,8 @@ Badges also display inside subgraphs:
 
 Enabled by default. Toggle in ComfyUI Settings: **Node Profiler - Enabled**.
 
+To access profiling data programmatically within your workflow (e.g., for logging or conditional logic), use the [Profiler Timing](#profiler-timing) node. It can read the execution time of any node by linking to it or specifying its ID.
+
 ---
 
 ### Node Navigation
