@@ -1,22 +1,32 @@
 [project]
 name = "comfyui-enhancement-utils"
 description = "A curated set of ComfyUI enhancements built on the V3 API with full subgraph support: real-time resource monitor (CPU/RAM/GPU/VRAM/temp), node execution profiler with per-node timing badges, graph auto-layout (Quick/Dagre/ELK), node navigation with Follow Execution, Play Sound, System Notification, and an image loader with subfolder scanning and metadata extraction. A modern, well-organized alternative to ComfyUI-Custom-Scripts and Crystools."
-version = "1.1.0"
+version = "1.2.0"
 keywords = [
     "ComfyUI",
     "ComfyUI-Custom-Scripts",
     "Crystools",
     "resource monitor",
+    "CPU monitor",
     "GPU monitor",
     "VRAM monitor",
+    "temperature monitor",
+    "power monitor",
+    "electricity cost",
     "node profiler",
+    "profiler timing",
+    "execution time",
+    "benchmark",
     "graph arrange",
     "graph layout",
     "ELK",
     "dagre",
     "node navigation",
+    "follow execution",
     "subgraph",
     "image loader",
+    "play sound",
+    "system notification",
     "utilities",
     "enhancement",
 ]
