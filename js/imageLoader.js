@@ -162,8 +162,50 @@ function refreshConnectedPrimitives(node) {
 
     const sourceNode = graph.getNodeById?.(link.origin_id);
     if (sourceNode && typeof sourceNode.refreshComboInNode === "function") {
+        // refreshComboInNode() updates widget.options.values, and clamps/reassigns
+        // widget.value ONLY if the current value fell out of range. After a
+        // workflow load/switch the Primitive's value is usually still valid, so it
+        // never re-assigns .value -- and a bare options.values mutation is invisible
+        // to Vue (Nodes 2.0). The dropdown keeps showing the stale stub options with
+        // a red "value not in list" outline until the value flows through the
+        // reactive path (e.g. on Run). Force that reactive path here.
         sourceNode.refreshComboInNode();
+        forceWidgetReactiveUpdate(sourceNode, sourceNode.widgets?.[0]);
     }
+}
+
+/**
+ * Force a Vue (Nodes 2.0) re-render and error re-evaluation for a widget whose
+ * ``options.values`` were mutated directly from JS.
+ *
+ * Re-assigning ``widget.value`` routes through the widget's reactive setter
+ * (BaseWidget writes its backing reactive store entry), which invalidates the
+ * computed that drives the rendered dropdown. Firing ``node.onWidgetChanged``
+ * clears the backend ``value_not_in_list`` execution error so the red outline
+ * goes away. Both are no-ops on the legacy canvas, so this is safe in either
+ * renderer.
+ *
+ * @param {Object} node - The LiteGraph node owning the widget.
+ * @param {Object} widget - The widget whose options were changed.
+ */
+function forceWidgetReactiveUpdate(node, widget) {
+    if (!widget) return;
+    const value = widget.value;
+
+    // Re-assigning the SAME value is a no-op: Vue's reactive setter short-circuits
+    // on Object.is(old, new), so processedWidgets never recomputes and the dropdown
+    // keeps its stale options. Write a transient sentinel first to defeat the
+    // equality check, then restore -- this forces the recompute that re-reads the
+    // updated options.values.
+    if (typeof value === "string") {
+        widget.value = value + "\x00";
+        widget.value = value;
+    } else {
+        widget.value = value;
+    }
+
+    // Clear the backend `value_not_in_list` execution error (the red outline).
+    node?.onWidgetChanged?.(widget.name, value, value, widget);
 }
 
 // ── Node Output Store (Preview Persistence) ────────────────────────────────

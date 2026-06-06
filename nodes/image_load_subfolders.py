@@ -115,21 +115,28 @@ def _is_annotated_path(value: str) -> bool:
 # ── Metadata Extraction ────────────────────────────────────────────────────
 
 def _extract_metadata(image_path: str, img: Image.Image) -> tuple[dict, dict]:
-    """Extract prompt and metadata from an image file.
+    """Extract embedded metadata and file stats from an image file.
+
+    The embedded ComfyUI data (prompt, workflow, EXIF, and any other PNG text
+    chunks) is collected into ``metadata``.  File-level stats (name, path,
+    dimensions, size) are collected separately into ``imagedata``.
 
     Returns:
-        (prompt_dict, metadata_dict): Parsed JSON dicts. Empty dicts if no
-        metadata is found or parsing fails.
+        (metadata_dict, imagedata_dict): Parsed JSON / stat dicts. ``metadata``
+        is empty if no embedded data is found or parsing fails; ``imagedata``
+        is empty only if the file cannot be stat'd.
     """
-    prompt = {}
     metadata = {}
+    imagedata = {}
 
     # File-level info.
     try:
         stat = os.stat(image_path)
-        metadata["fileinfo"] = {
+        imagedata = {
             "filename": os.path.basename(image_path),
-            "filepath": image_path,
+            "path": os.path.dirname(image_path),
+            "width": img.width,
+            "height": img.height,
             "resolution": f"{img.width}x{img.height}",
             "size_bytes": stat.st_size,
         }
@@ -152,8 +159,7 @@ def _extract_metadata(image_path: str, img: Image.Image) -> tuple[dict, dict]:
             else:
                 parsed = value
 
-            if key == "prompt":
-                prompt = parsed if isinstance(parsed, dict) else {}
+            # 'prompt' and 'workflow' chunks land here alongside any others.
             metadata[key] = parsed
 
     # WebP: metadata may be stored in EXIF tags (ComfyUI convention).
@@ -167,7 +173,7 @@ def _extract_metadata(image_path: str, img: Image.Image) -> tuple[dict, dict]:
                     raw = raw.decode("utf-8", errors="replace")
                 text = raw.replace("Prompt:", "", 1).strip()
                 try:
-                    prompt = json.loads(text)
+                    metadata["prompt"] = json.loads(text)
                 except (json.JSONDecodeError, ValueError):
                     metadata["prompt_raw"] = text
 
@@ -194,7 +200,7 @@ def _extract_metadata(image_path: str, img: Image.Image) -> tuple[dict, dict]:
         except Exception:
             pass
 
-    return prompt, metadata
+    return metadata, imagedata
 
 
 # ── Node Definition ─────────────────────────────────────────────────────────
@@ -241,8 +247,8 @@ class ImageLoadWithSubfolders(io.ComfyNode):
             outputs=[
                 io.Image.Output(display_name="image"),
                 io.Mask.Output(display_name="mask"),
-                io.String.Output(display_name="prompt"),
                 io.String.Output(display_name="metadata"),
+                io.String.Output(display_name="imagedata"),
             ],
             search_aliases=[
                 "load image subfolders",
@@ -282,7 +288,7 @@ class ImageLoadWithSubfolders(io.ComfyNode):
         img = node_helpers.pillow(Image.open, image_path)
 
         # Extract metadata before any transforms that might strip it.
-        prompt, metadata = _extract_metadata(image_path, img)
+        metadata, imagedata = _extract_metadata(image_path, img)
 
         # Process image frames (handles animated GIF/APNG, multi-page TIFF, MPO).
         output_images = []
@@ -339,10 +345,10 @@ class ImageLoadWithSubfolders(io.ComfyNode):
             output_mask = output_masks[0]
 
         # Serialize metadata to JSON strings for the STRING outputs.
-        prompt_json = json.dumps(prompt, ensure_ascii=False, indent=2)
         metadata_json = json.dumps(metadata, ensure_ascii=False, indent=2)
+        imagedata_json = json.dumps(imagedata, ensure_ascii=False, indent=2)
 
-        return io.NodeOutput(output_image, output_mask, prompt_json, metadata_json)
+        return io.NodeOutput(output_image, output_mask, metadata_json, imagedata_json)
 
     @classmethod
     def fingerprint_inputs(cls, image: str, folder_path: str = "",

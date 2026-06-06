@@ -4,7 +4,7 @@ A curated collection of enhancement utilities for ComfyUI, combining and improvi
 
 > **Full Subgraph Support** -- Every feature in this package works inside subgraphs. Graph arrangement, node navigation, execution profiling, and running-node highlights all handle nested subgraphs correctly. None of the original packages these features were drawn from support subgraphs.
 
-> **Nodes 2.0 Compatible** -- Every feature works in both the legacy LiteGraph canvas renderer and the new Nodes 2.0 Vue renderer. Profiling badges, graph arrangement, node navigation, resource monitoring, and all nodes function correctly in either mode.
+> **Nodes 2.0 Compatible** -- Every feature works in both the legacy LiteGraph canvas renderer and the new Nodes 2.0 Vue renderer. Profiling badges, graph arrangement, node navigation, resource monitoring, and all nodes function correctly in either mode. (One minor exception: the image loader's custom-folder on-node preview and MaskEditor are legacy-canvas only -- see [Load Image (With Subfolders)](#load-image-with-subfolders).)
 
 ## Features
 
@@ -191,21 +191,34 @@ Both `node_link` and `node_ids` are additive -- their resolved times are summed 
 
 **Category: image** | **Node: Load Image (With Subfolders)**
 
-An enhanced image loader that recursively scans the input directory for images, including all subfolders. Also extracts embedded metadata from PNG and WebP files.
+An enhanced image loader that recursively scans for images (including all subfolders) and extracts embedded metadata from PNG and WebP files. It works in two modes:
+
+- **Default mode** -- pick from the ComfyUI input directory via the `image` dropdown (recursively scanned, subfolders shown as `subfolder/filename.png`).
+- **Custom-folder mode** -- set `folder_path` to any folder on disk and pick from it via the `folder_image` dropdown.
+
+Setting `folder_path` switches to custom-folder mode and overrides the `image` dropdown. The node automatically shows only the widgets relevant to the active mode.
 
 | Input | Type | Description |
 |-------|------|-------------|
-| image | Combo (with upload) | Select an image from the input directory. Subfolders are fully supported and shown as `subfolder/filename.png`. |
+| image | Combo (with upload) | Default mode. Select an image from the input directory. Subfolders are fully supported and shown as `subfolder/filename.png`. |
+| folder_path | String (optional) | Absolute path, or a path relative to the input directory. When set, switches to custom-folder mode and scans the folder recursively. |
+| folder_image | Combo (optional) | Custom-folder mode. The image to load from `folder_path`. Populated automatically when `folder_path` is set. |
 
 | Output | Type | Description |
 |--------|------|-------------|
 | image | IMAGE | The loaded image tensor. Supports multi-frame (GIF, APNG, TIFF), 16-bit, and palette transparency. |
 | mask | MASK | Alpha mask (or zeros if no alpha channel). |
-| prompt | STRING | Embedded prompt metadata as JSON (empty `{}` if none found). |
-| metadata | STRING | Full embedded metadata as JSON (PNG text chunks, WebP EXIF, JPEG EXIF). |
+| metadata | STRING | Full embedded metadata as JSON, including `prompt` and `workflow` (PNG text chunks, WebP EXIF, JPEG EXIF). Empty `{}` if none found. |
+| imagedata | STRING | File stats as JSON: `filename`, `path` (directory only), `width`, `height`, `resolution`, `size_bytes`. |
+
+> **Breaking change (v1.3.0+)** -- the standalone `prompt` output was removed. The embedded prompt now lives inside the `metadata` JSON (alongside `workflow`). Use the **Parse JSON (EnhUtils)** node to pull values back out as structured objects.
 
 Improvements over other image loaders:
+- **Custom-folder loading** -- load from any folder on disk (absolute or input-relative) via `folder_path`, scanned recursively
 - **Recursive subfolder scanning** with `os.walk`
+- **Live preview** -- the selected custom-folder image previews on the node and persists across workflow-tab switches and subgraph navigation (legacy canvas)
+- **MaskEditor + Paste (Clipspace)** -- supported in custom-folder mode; the chosen image is copied to a temp location on demand (not on every selection), and re-opening MaskEditor reloads an existing mask (legacy canvas)
+- **Primitive node support** -- the `folder_image` combo populates on a connected Primitive node, updating on page load, `folder_path` change, and global refresh
 - **Content-type filtering** -- only shows actual image files (uses ComfyUI's MIME-type detection)
 - **Truncated image recovery** -- uses `node_helpers.pillow()` for resilient loading
 - **Multi-frame support** -- handles animated GIF/APNG, multi-page TIFF, MPO format
@@ -213,7 +226,25 @@ Improvements over other image loaders:
 - **Palette transparency** -- handles `P` mode images with transparency info
 - **Metadata extraction** -- PNG text chunks, WebP EXIF (via piexif), JPEG EXIF
 - **SHA-256 caching** -- only re-executes when the file on disk actually changes
-- Excludes system files (`Thumbs.db`, `.DS_Store`, `desktop.ini`) and dot-folders
+- Excludes system files (`Thumbs.db`, `.DS_Store`, `desktop.ini`), dot-folders, and the `clipspace` temp folder
+
+> **Nodes 2.0 note** -- Custom-folder mode loads and outputs the selected image correctly in the Nodes 2.0 (Vue) renderer, but the on-node image preview does not update on `folder_image` change and MaskEditor is not supported in custom-folder mode there. Use the legacy canvas renderer for preview and MaskEditor with custom folders. Default mode works fully in both renderers.
+
+---
+
+### Parse JSON (EnhUtils)
+
+**Category: utils** | **Node: Parse JSON (EnhUtils)**
+
+Parses a JSON string into a native Python object (list, dict, number, etc.) so it can be consumed by nodes that accept any-type inputs. Pairs well with the `metadata`/`imagedata` outputs of **Load Image (With Subfolders)** and with scripting nodes like [rgthree](https://github.com/rgthree/rgthree-comfy)'s Power Puter.
+
+| Input | Type | Description |
+|-------|------|-------------|
+| json_string | String (forced input) | A JSON string to parse into a Python object. |
+
+| Output | Type | Description |
+|--------|------|-------------|
+| data | Any | The parsed Python object. |
 
 ---
 

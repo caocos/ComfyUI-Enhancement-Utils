@@ -8,10 +8,12 @@ from .play_sound import PlaySound
 from .system_notification import SystemNotification
 from .image_load_subfolders import ImageLoadWithSubfolders
 from .profiler_timing import ProfilerTiming
+from .parse_json import ParseJSON
 
 ALL_NODES = [
     PlaySound,
     SystemNotification,
     ImageLoadWithSubfolders,
     ProfilerTiming,
+    ParseJSON,
 ]
