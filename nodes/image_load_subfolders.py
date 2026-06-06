@@ -42,16 +42,19 @@ EXCLUDE_FILES = {"Thumbs.db", "*.DS_Store", "desktop.ini", "*.lock"}
 EXCLUDE_DIRS = {"clipspace", ".*"}
 
 
-def _get_image_file_list() -> list[str]:
-    """Recursively scan the input directory for image files, including subfolders.
+def _scan_image_dir(base_dir: str) -> list[str]:
+    """Recursively scan a directory for image files, including subfolders.
 
-    Returns a sorted list of relative paths using forward slashes (cross-platform).
-    Non-image files are filtered out using ComfyUI's MIME-type detection.
+    Args:
+        base_dir: Absolute path to the directory to scan.
+
+    Returns:
+        A sorted list of relative paths (forward slashes, cross-platform).
+        Non-image files are filtered out using ComfyUI's MIME-type detection.
     """
-    input_dir = folder_paths.get_input_directory()
     candidates = []
 
-    for root, dirs, files in os.walk(input_dir, followlinks=True):
+    for root, dirs, files in os.walk(base_dir, followlinks=True):
         # Prune excluded directories in-place so os.walk doesn't descend into them.
         dirs[:] = [
             d for d in dirs
@@ -65,13 +68,48 @@ def _get_image_file_list() -> list[str]:
         ]
 
         for filename in files:
-            relpath = os.path.relpath(os.path.join(root, filename), start=input_dir)
+            relpath = os.path.relpath(os.path.join(root, filename), start=base_dir)
             # Normalize to forward slashes for consistent cross-platform paths.
             candidates.append(relpath.replace("\\", "/"))
 
     # Use ComfyUI's built-in content type filter to keep only actual image files.
     image_files = folder_paths.filter_files_content_types(candidates, ["image"])
     return sorted(image_files)
+
+
+def _get_image_file_list() -> list[str]:
+    """Recursively scan the ComfyUI input directory for image files.
+
+    Convenience wrapper around :func:`_scan_image_dir` for the default input
+    directory. Used by the ``image`` combo in :meth:`define_schema`.
+    """
+    return _scan_image_dir(folder_paths.get_input_directory())
+
+
+def _resolve_folder(folder_path: str) -> str:
+    """Resolve a folder path to an absolute directory path.
+
+    If *folder_path* is relative it is resolved against the ComfyUI input
+    directory. Raises :class:`ValueError` if the resolved path does not exist
+    or is not a directory.
+    """
+    if not os.path.isabs(folder_path):
+        folder_path = os.path.join(folder_paths.get_input_directory(), folder_path)
+    folder_path = os.path.normpath(folder_path)
+    if not os.path.isdir(folder_path):
+        raise ValueError(f"Folder does not exist or is not a directory: {folder_path}")
+    return folder_path
+
+
+def _is_annotated_path(value: str) -> bool:
+    """Check whether a string is a ComfyUI annotated filepath.
+
+    Annotated paths end with a ``[type]`` suffix, e.g.
+    ``clipspace/file.png [input]`` or ``file.png [temp]``.  These are
+    produced by MaskEditor saves and "Paste (clipspace)" actions.
+    """
+    import re
+    return bool(value and re.search(r' \[[^\]]+\]$', value.strip()))
 
 
 # ── Metadata Extraction ────────────────────────────────────────────────────
@@ -91,6 +129,7 @@ def _extract_metadata(image_path: str, img: Image.Image) -> tuple[dict, dict]:
         stat = os.stat(image_path)
         metadata["fileinfo"] = {
             "filename": os.path.basename(image_path),
+            "filepath": image_path,
             "resolution": f"{img.width}x{img.height}",
             "size_bytes": stat.st_size,
         }
@@ -179,6 +218,25 @@ class ImageLoadWithSubfolders(io.ComfyNode):
                     upload=io.UploadType.image,
                     tooltip="Select an image from the input directory. Subfolders are fully supported.",
                 ),
+                io.String.Input(
+                    "folder_path",
+                    default="",
+                    optional=True,
+                    tooltip=(
+                        "Absolute path or path relative to the input directory. "
+                        "When set, overrides the image dropdown above. "
+                        "The folder is scanned recursively for images."
+                    ),
+                ),
+                io.Combo.Input(
+                    "folder_image",
+                    options=[""],
+                    optional=True,
+                    tooltip=(
+                        "Pick an image from the custom folder. "
+                        "Populated automatically when folder_path is set."
+                    ),
+                ),
             ],
             outputs=[
                 io.Image.Output(display_name="image"),
@@ -197,8 +255,28 @@ class ImageLoadWithSubfolders(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image: str) -> io.NodeOutput:
-        image_path = folder_paths.get_annotated_filepath(image)
+    def execute(cls, image: str, folder_path: str = "", folder_image: str = "") -> io.NodeOutput:
+        # Resolve the image path: custom folder overrides the dropdown.
+        if folder_path.strip():
+            if not folder_image or not folder_image.strip():
+                raise ValueError("folder_path is set but no folder_image selected.")
+
+            # If folder_image is an annotated path (from MaskEditor save or
+            # clipspace paste, e.g. "file.png [temp]"), resolve it via the
+            # annotated-filepath mechanism.  Otherwise resolve it as a
+            # relative path inside the custom folder.
+            if _is_annotated_path(folder_image):
+                image_path = folder_paths.get_annotated_filepath(folder_image)
+            else:
+                base = _resolve_folder(folder_path)
+                image_path = os.path.normpath(os.path.join(base, folder_image))
+                if not os.path.isfile(image_path):
+                    raise FileNotFoundError(
+                        f"Image not found in custom folder: {folder_image} "
+                        f"(resolved to {image_path})"
+                    )
+        else:
+            image_path = folder_paths.get_annotated_filepath(image)
 
         # Open the image with ComfyUI's resilient PIL wrapper (handles truncated files).
         img = node_helpers.pillow(Image.open, image_path)
@@ -267,17 +345,49 @@ class ImageLoadWithSubfolders(io.ComfyNode):
         return io.NodeOutput(output_image, output_mask, prompt_json, metadata_json)
 
     @classmethod
-    def fingerprint_inputs(cls, image: str, **kwargs):
+    def fingerprint_inputs(cls, image: str, folder_path: str = "",
+                           folder_image: str = "", **kwargs):
         """Return a hash of the file contents so ComfyUI re-executes only when
         the actual file on disk changes (not just because settings changed)."""
-        image_path = folder_paths.get_annotated_filepath(image)
+        if folder_path.strip():
+            if _is_annotated_path(folder_image or ""):
+                image_path = folder_paths.get_annotated_filepath(folder_image)
+            else:
+                base = _resolve_folder(folder_path)
+                image_path = os.path.normpath(os.path.join(base, folder_image))
+        else:
+            image_path = folder_paths.get_annotated_filepath(image)
         m = hashlib.sha256()
         with open(image_path, "rb") as f:
             m.update(f.read())
         return m.digest().hex()
 
     @classmethod
-    def validate_inputs(cls, image: str, **kwargs) -> bool | str:
+    def validate_inputs(cls, image: str, folder_path: str = "",
+                        folder_image: str = "", **kwargs) -> bool | str:
+        """Validate inputs before execution.
+
+        In custom-folder mode, verify the folder exists and the selected image
+        is a real file inside it. In dropdown mode, fall back to the standard
+        annotated-filepath check.
+        """
+        if folder_path.strip():
+            if not folder_image or not folder_image.strip():
+                return "folder_path is set but no folder_image selected."
+            # Annotated paths (from MaskEditor save or clipspace paste) are
+            # resolved via the annotated-filepath mechanism.
+            if _is_annotated_path(folder_image):
+                if not folder_paths.exists_annotated_filepath(folder_image):
+                    return f"Image not found: {folder_image}"
+                return True
+            try:
+                base = _resolve_folder(folder_path)
+            except ValueError as exc:
+                return str(exc)
+            resolved = os.path.normpath(os.path.join(base, folder_image))
+            if not os.path.isfile(resolved):
+                return f"Image not found in custom folder: {folder_image}"
+            return True
         if not folder_paths.exists_annotated_filepath(image):
             return f"Invalid image file: {image}"
         return True

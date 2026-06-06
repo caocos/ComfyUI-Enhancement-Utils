@@ -29,6 +29,9 @@ from . import profiler  # noqa: F401
 # Import middleware to fix subfolder paths in /api/view thumbnail requests.
 from . import middleware  # noqa: F401
 
+# Import image-loader routes for the custom-folder combo endpoint.
+from .nodes import image_load_routes  # noqa: F401
+
 
 class EnhancementUtilsExtension(ComfyExtension):
     """Main extension class that registers all Enhancement Utils nodes."""
