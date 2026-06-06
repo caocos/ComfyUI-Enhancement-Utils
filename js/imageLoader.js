@@ -46,6 +46,126 @@ const NODE_TYPE = "EnhancementUtils_ImageLoadWithSubfolders";
 /** @type {Map<string, string[]>} Cached image lists keyed by folder path. */
 const listCache = new Map();
 
+// ── GET_CONFIG Symbol (Primitive Node Support) ─────────────────────────────
+
+/**
+ * The framework's ``GET_CONFIG`` symbol, used by Primitive nodes to read
+ * combo options from an input slot's widget. Discovered at runtime via
+ * ``Object.getOwnPropertySymbols`` on an input widget the framework has
+ * already wired.
+ *
+ * @type {symbol|null}
+ */
+let _getConfigSymbol = null;
+
+/**
+ * Find the framework's ``GET_CONFIG`` symbol by inspecting an input slot's
+ * widget for symbol-keyed properties whose value is a function returning
+ * an array (the ``InputSpec`` shape).
+ *
+ * @param {Object} node - The LiteGraph node instance.
+ * @returns {symbol|null} The ``GET_CONFIG`` symbol, or null if not found.
+ */
+function findGetConfigSymbol(node) {
+    if (_getConfigSymbol) return _getConfigSymbol;
+
+    for (const input of node.inputs ?? []) {
+        if (!input.widget) continue;
+        const symbols = Object.getOwnPropertySymbols(input.widget);
+        for (const sym of symbols) {
+            const val = input.widget[sym];
+            if (typeof val === "function") {
+                try {
+                    const result = val();
+                    if (Array.isArray(result)) {
+                        _getConfigSymbol = sym;
+                        return sym;
+                    }
+                } catch (_) {
+                    // Skip symbols whose getter throws.
+                }
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Install or re-install a ``GET_CONFIG`` override on the ``folder_image``
+ * input slot's widget so that Primitive nodes read the live combo options
+ * instead of the static node definition (which only has ``[""]``).
+ *
+ * @param {Object} node - The LiteGraph node instance.
+ */
+function installFolderImageGetConfig(node) {
+    const sym = findGetConfigSymbol(node);
+    if (!sym) return;
+
+    const input = node.inputs?.find((i) => i.widget?.name === "folder_image");
+    if (!input?.widget) return;
+
+    const combo = findWidget(node, "folder_image");
+    if (!combo) return;
+
+    const folderWidget = findWidget(node, "folder_path");
+
+    // Return the live options list in the InputSpec shape: [valuesArray, opts].
+    // The Primitive reads [0] as the combo values.
+    //
+    // Guard against the global "R" refresh (reloadNodeDefs) transiently
+    // clobbering our combo's options to the static [""] from the node
+    // definition: that clobber happens *before* our async refresh hook
+    // repopulates the list, and a connected Primitive's refreshComboInNode
+    // would read [""] and reset its value to item 0. When the live options
+    // are empty/[""], fall back to the last-known-good list cached by
+    // folder_path so the Primitive keeps its selection.
+    input.widget[sym] = () => {
+        const live = combo.options?.values;
+        const isEmpty =
+            !Array.isArray(live) ||
+            live.length === 0 ||
+            (live.length === 1 && live[0] === "");
+
+        if (isEmpty) {
+            const key = (folderWidget?.value ?? "").trim();
+            const cached = key ? listCache.get(key) : undefined;
+            if (cached && cached.length > 0) {
+                return [cached.slice(), {}];
+            }
+        }
+
+        return [(live ?? [""]).slice(), {}];
+    };
+}
+
+/**
+ * Notify any Primitive node connected to the ``folder_image`` input slot
+ * that its combo options have changed. The Primitive caches a reference to
+ * the input slot's widget object and reads ``GET_CONFIG`` lazily; calling
+ * its ``refreshComboInNode()`` forces it to re-read the (now overridden)
+ * ``GET_CONFIG`` and rebuild its own dropdown.
+ *
+ * Without this, the Primitive's combo stays at the stale snapshot it took
+ * during ``_onFirstConnection()`` (page load) or the last global Refresh.
+ *
+ * @param {Object} node - The LiteGraph node instance.
+ */
+function refreshConnectedPrimitives(node) {
+    const input = node.inputs?.find((i) => i.widget?.name === "folder_image");
+    if (!input || input.link == null) return;
+
+    const graph = node.graph;
+    if (!graph) return;
+
+    const link = graph.links?.[input.link];
+    if (!link) return;
+
+    const sourceNode = graph.getNodeById?.(link.origin_id);
+    if (sourceNode && typeof sourceNode.refreshComboInNode === "function") {
+        sourceNode.refreshComboInNode();
+    }
+}
+
 // ── API ────────────────────────────────────────────────────────────────────
 
 /**
@@ -224,6 +344,12 @@ function applyImageList(node, images) {
         combo.value = finalImages.length > 0 ? finalImages[0] : "";
         combo.callback?.(combo.value);
     }
+
+    // Re-assert GET_CONFIG override so Primitive nodes see updated options.
+    installFolderImageGetConfig(node);
+
+    // Kick any connected Primitive to re-read the live combo values.
+    refreshConnectedPrimitives(node);
 }
 
 // ── Preview (Legacy Canvas Renderer) ───────────────────────────────────────
@@ -368,6 +494,10 @@ function installImageWidgetAccessor(node, imageWidget) {
             // Select it (and fire the callback to update info + preview).
             combo.value = newValue;
             combo.callback?.(newValue);
+
+            // Sync the connected Primitive's dropdown with the new entry.
+            installFolderImageGetConfig(node);
+            refreshConnectedPrimitives(node);
         },
         enumerable: true,
         configurable: true,
@@ -586,11 +716,16 @@ app.registerExtension({
             const fp = folderWidget?.value ?? "";
             syncWidgetVisibility(node, fp);
 
-            // Install the image widget accessor to detect MaskEditor saves.
+            // Install the image widget accessor to detect MaskEditor saves
+            // and clipspace pastes.
             const imageWidget = findWidget(node, "image");
             if (imageWidget) {
                 installImageWidgetAccessor(node, imageWidget);
             }
+
+            // Override GET_CONFIG on the folder_image input so Primitive
+            // nodes read the live combo options instead of the static [""].
+            installFolderImageGetConfig(node);
 
             if (fp.trim()) {
                 refreshFolderCombo(node);
