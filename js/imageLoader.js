@@ -166,6 +166,78 @@ function refreshConnectedPrimitives(node) {
     }
 }
 
+// ── Node Output Store (Preview Persistence) ────────────────────────────────
+
+/**
+ * Compute a node's NodeLocatorId -- the key the ComfyUI frontend uses for
+ * ``app.nodeOutputs`` and ``app.nodePreviewImages``.
+ *
+ * Mirrors the frontend's ``nodeToNodeLocatorId``: root-graph nodes use the
+ * bare local id; subgraph nodes use ``<immediateSubgraphUUID>:<localId>``.
+ * Note this is the *immediate* containing subgraph only -- NOT the full
+ * colon-delimited execution path (that's ``getUniqueIdFromNode``).
+ *
+ * @param {Object} node - The LiteGraph node instance.
+ * @returns {string} The NodeLocatorId.
+ */
+function nodeLocatorKey(node) {
+    const graph = node.graph;
+    if (graph && graph.isRootGraph === false && graph.id) {
+        return `${graph.id}:${node.id}`;
+    }
+    return String(node.id);
+}
+
+/**
+ * Make the folder image's preview URL the authoritative *visible* preview
+ * for this node by writing it into the frontend's node output store.
+ *
+ * ``getNodeImageUrls`` checks ``app.nodePreviewImages[locator]`` *before*
+ * ``app.nodeOutputs[locator]``, so injecting the URL there makes the core
+ * ``showPreview()`` (which fires on page load, tab switch, and subgraph
+ * navigation) load *our* folder image instead of the hidden ``image``
+ * widget's picture. The plain (non-blob) URL is leak-safe: the store's
+ * ``retain/releaseSharedObjectUrl`` are no-ops for non-blob URLs.
+ *
+ * IMPORTANT: we do NOT touch ``app.nodeOutputs[locator]`` here. That map is
+ * what the MaskEditor / Copy / Save / Open Image consumers read (via a
+ * ``/view`` URL), and deleting it forces them onto ``node.imgs[0].src`` --
+ * our custom preview URL has no ``filename`` param, so MaskEditor's
+ * ``parseImageRef`` throws "Invalid image URL". Leaving ``nodeOutputs``
+ * alone keeps those consumers working; ``nodePreviewImages`` already wins
+ * the visible preview because it is checked first.
+ *
+ * @param {Object} node - The LiteGraph node instance.
+ * @param {string} url - The folder image preview URL.
+ */
+function setFolderPreviewInStore(node, url) {
+    const key = nodeLocatorKey(node);
+    try {
+        if (app.nodePreviewImages) {
+            app.nodePreviewImages[key] = [url];
+        }
+    } catch (err) {
+        console.warn("[EnhancementUtils] ImageLoader: failed to set store preview:", err);
+    }
+}
+
+/**
+ * Remove this node's folder preview override from the store so default
+ * (non-folder-mode) preview behaviour resumes.
+ *
+ * @param {Object} node - The LiteGraph node instance.
+ */
+function clearFolderPreviewFromStore(node) {
+    const key = nodeLocatorKey(node);
+    try {
+        if (app.nodePreviewImages) {
+            delete app.nodePreviewImages[key];
+        }
+    } catch (err) {
+        console.warn("[EnhancementUtils] ImageLoader: failed to clear store preview:", err);
+    }
+}
+
 // ── API ────────────────────────────────────────────────────────────────────
 
 /**
@@ -309,8 +381,24 @@ function syncWidgetVisibility(node, folderPath) {
         showWidget(imageWidget);
         showWidget(uploadWidget);
         hideWidget(folderImageWidget);
+
+        // Leaving folder mode: drop the folder preview override so the
+        // default ``image`` widget preview can take over again.
+        clearFolderPreviewFromStore(node);
+
+        // The folder preview left a stale ``node.imgs``; nothing re-derives
+        // the ``image`` widget preview just from un-hiding it. Re-fire the
+        // image widget's callback so the core repaints from its current
+        // selection. Only meaningful on an actual folder->regular switch.
+        if (node._wasFolderMode && imageWidget) {
+            const v = imageWidget.value;
+            if (typeof v === "string" && v.trim() && !isAnnotatedPath(v)) {
+                imageWidget.callback?.(v);
+            }
+        }
     }
 
+    node._wasFolderMode = hasFolder;
     node.graph?.setDirtyCanvas?.(true, true);
 }
 
@@ -406,6 +494,11 @@ function buildAnnotatedPreviewUrl(annotatedPath) {
  * Uses the custom preview endpoint for real folder images, or the standard
  * ``/view`` endpoint for clipspace images.
  *
+ * The preview URL is also written into the frontend's node output store
+ * (see ``setFolderPreviewInStore``) so the folder preview survives tab
+ * switches and subgraph navigation -- the core ``image``-widget preview
+ * otherwise wins those, since it is snapshotted/restored via that store.
+ *
  * @param {Object} node - The LiteGraph node instance.
  */
 function updatePreview(node) {
@@ -413,12 +506,16 @@ function updatePreview(node) {
     const folderImage = findWidget(node, "folder_image")?.value ?? "";
 
     if (!folderPath.trim() || !folderImage.trim()) {
+        clearFolderPreviewFromStore(node);
         return;
     }
 
     const url = isAnnotatedPath(folderImage)
         ? buildAnnotatedPreviewUrl(folderImage)
         : buildFolderPreviewUrl(folderPath, folderImage);
+
+    // Make our folder image the authoritative preview source for this node.
+    setFolderPreviewInStore(node, url);
 
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -729,6 +826,12 @@ app.registerExtension({
 
             if (fp.trim()) {
                 refreshFolderCombo(node);
+
+                // The core IMAGEUPLOAD widget schedules its own rAF that may
+                // paint the (hidden) ``image`` widget's preview. Re-assert the
+                // folder preview a tick later so we deterministically win that
+                // race on page load, tab switch, and subgraph rebuild.
+                requestAnimationFrame(() => updatePreview(node));
             }
         });
     },
