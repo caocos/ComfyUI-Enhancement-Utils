@@ -46,6 +46,19 @@ const NODE_TYPE = "EnhancementUtils_ImageLoadWithSubfolders";
 /** @type {Map<string, string[]>} Cached image lists keyed by folder path. */
 const listCache = new Map();
 
+/**
+ * Node ids detected as "old-format" during the current graph load -- saves
+ * made before the ``folder_path`` input existed. ComfyUI restores
+ * ``widgets_values`` positionally, so an old node's ``upload`` value (the
+ * literal string ``"image"``) lands on the new ``folder_path`` widget and
+ * wrongly flips the node into custom-folder mode. Populated in
+ * ``beforeConfigureGraph`` (which sees the raw saved JSON) and consumed in
+ * ``loadedGraphNode`` (after widget values are restored).
+ *
+ * @type {Set<number|string>}
+ */
+const oldFormatNodeIds = new Set();
+
 // ── GET_CONFIG Symbol (Primitive Node Support) ─────────────────────────────
 
 /**
@@ -531,6 +544,30 @@ function buildAnnotatedPreviewUrl(annotatedPath) {
 }
 
 /**
+ * Clear the node's folder preview entirely.
+ *
+ * Drops the store override and wipes the legacy canvas preview so a
+ * previously-shown folder image doesn't linger when there is no folder
+ * image to show (e.g. the selected folder contains no images, or no
+ * folder image is selected).
+ *
+ * @param {Object} node - The LiteGraph node instance.
+ */
+function clearPreview(node) {
+    // Drop the folder preview override from the frontend store.
+    clearFolderPreviewFromStore(node);
+
+    // Wipe the legacy canvas preview so a previously-shown folder image
+    // doesn't linger when the new folder has no selectable image (e.g. an
+    // empty folder). An empty ``node.imgs`` is the canonical "no preview"
+    // state both the legacy and Nodes 2.0 renderers respect.
+    node.imgs = [];
+    node.imageIndex = null;
+
+    node.graph?.setDirtyCanvas?.(true, true);
+}
+
+/**
  * Load an image preview and set it on the node for the legacy canvas renderer.
  *
  * Uses the custom preview endpoint for real folder images, or the standard
@@ -548,7 +585,7 @@ function updatePreview(node) {
     const folderImage = findWidget(node, "folder_image")?.value ?? "";
 
     if (!folderPath.trim() || !folderImage.trim()) {
-        clearFolderPreviewFromStore(node);
+        clearPreview(node);
         return;
     }
 
@@ -713,6 +750,11 @@ async function refreshFolderCombo(node, bypassCache = false) {
     const combo = findWidget(node, "folder_image");
     if (combo?.value && combo.value.trim()) {
         handleFolderImageChange(node, combo.value);
+    } else {
+        // Empty folder (no selectable image): wipe any stale preview left
+        // from a previously-selected folder so it's obvious the folder has
+        // no images.
+        clearPreview(node);
     }
 }
 
@@ -891,5 +933,59 @@ app.registerExtension({
             promises.push(refreshFolderCombo(node, /* bypassCache */ true));
         });
         await Promise.all(promises);
+    },
+
+    /**
+     * Detect old-format saves before any widget values are restored.
+     *
+     * Reads the raw workflow JSON (the only hook where each node's ``inputs``
+     * reflect the original save, unmutated by ComfyUI's ``configure``
+     * reconciliation). A node saved before the ``folder_path`` input existed
+     * has no ``folder_path`` entry in its ``inputs`` array; we record its id
+     * so ``loadedGraphNode`` can scrub the leaked value afterwards.
+     *
+     * @param {Object} graphData - The parsed workflow JSON.
+     * @param {string[]} _missing - Missing node types (unused).
+     */
+    beforeConfigureGraph(graphData, _missing) {
+        // Clear stale ids from any previous graph load.
+        oldFormatNodeIds.clear();
+
+        for (const node of graphData?.nodes ?? []) {
+            if (node?.type !== NODE_TYPE) continue;
+            const hasFolderPathInput = (node.inputs ?? []).some(
+                (i) => i?.name === "folder_path"
+            );
+            if (!hasFolderPathInput) {
+                oldFormatNodeIds.add(node.id);
+            }
+        }
+    },
+
+    /**
+     * Scrub the leaked ``folder_path`` value on old-format nodes.
+     *
+     * For nodes flagged by ``beforeConfigureGraph``, ComfyUI's positional
+     * ``widgets_values`` restore put the old ``upload`` value (the literal
+     * string ``"image"``) onto the ``folder_path`` widget. Clear it so the
+     * node returns to its default (dropdown) mode. Only the exact leaked
+     * value is cleared, so a genuine folder named ``image`` (which only
+     * exists in new-format saves that carry a ``folder_path`` input, and are
+     * therefore never flagged) is never affected.
+     *
+     * @param {Object} node - A fully-configured node instance.
+     */
+    loadedGraphNode(node) {
+        if (node?.comfyClass !== NODE_TYPE) return;
+        if (!oldFormatNodeIds.has(node.id)) return;
+
+        oldFormatNodeIds.delete(node.id);
+
+        const folderWidget = findWidget(node, "folder_path");
+        if (folderWidget && folderWidget.value === "image") {
+            folderWidget.value = "";
+            // Return the node to default (dropdown) mode.
+            syncWidgetVisibility(node, "");
+        }
     },
 });
