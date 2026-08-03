@@ -84,9 +84,10 @@ app.registerExtension({
             let isRunning = false;
             if (app.runningNodeId) {
                 const runningSegments = String(app.runningNodeId).split(":");
-                const lastSegment = Number(runningSegments[runningSegments.length - 1]);
+                const lastSegment = runningSegments[runningSegments.length - 1];
                 // Quick ID check, then verify via full path to handle subgraph ambiguity.
-                if (lastSegment === node.id && findNodeByExecutionId(app.runningNodeId) === node) {
+                // node.id is a string since frontend 1.46, a number before -- compare as strings.
+                if (lastSegment === String(node.id) && findNodeByExecutionId(app.runningNodeId) === node) {
                     isRunning = true;
                 }
             }

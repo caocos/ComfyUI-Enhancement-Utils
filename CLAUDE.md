@@ -136,7 +136,8 @@ The Nodes 2.0 Vue renderer tracks node positions via a `pos` setter on `LGraphNo
 - `app.graph` is always the root graph. `app.canvas.graph` is whatever graph the user is currently viewing (root or subgraph). Always use `app.canvas.graph` for operations that should work inside subgraphs.
 - Subgraph IO nodes (`graph.inputNode` id=-10, `graph.outputNode` id=-20) are NOT in `graph._nodes`. They are separate `Positionable` objects stored directly on the `Subgraph` instance. They must be positioned explicitly after any arrangement.
 - Group membership must be refreshed via `group.recomputeInsideNodes()` before reading `group.nodes` or `group._children` -- the data is stale until this is called.
-- ComfyUI uses three node identifier types: `node.id` (local number), execution ID (`"1:2:3"` colon-delimited string for backend/UNIQUE_ID), and locator ID (`"<uuid>:<localId>"` for UI state). Use `getUniqueIdFromNode(node)` from `js/utils.js` to reconstruct a node's execution ID at runtime.
+- ComfyUI uses three node identifier types: `node.id` (local), execution ID (`"1:2:3"` colon-delimited string for backend/UNIQUE_ID), and locator ID (`"<uuid>:<localId>"` for UI state). Use `getUniqueIdFromNode(node)` from `js/utils.js` to reconstruct a node's execution ID at runtime.
+- **`node.id` is a string**, not a number. Frontend 1.46 branded it (`NodeId = string & {__brand}`); `LGraph.add()` runs `node.id = parseNodeId(node.id)`, so a node is `"5"`, not `5`, and an unassigned node is `"-1"`. Never compare it against a `Number(...)` — always `String(node.id)`. This silently broke every strict comparison written against the pre-1.46 numeric id.
 
 ### GPU Monitoring Pitfalls
 - `pynvml` can throw `UnicodeDecodeError` on GPU names (some drivers return non-UTF-8 bytes)

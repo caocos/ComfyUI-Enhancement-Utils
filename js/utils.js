@@ -5,7 +5,9 @@
  * especially the colon-delimited execution IDs used for subgraph support.
  *
  * ComfyUI uses three distinct node identifier types:
- *   - node.id        (number)  -- Local to its immediate graph level.
+ *   - node.id        (string)  -- Local to its immediate graph level. Branded as
+ *                                  a string since frontend 1.46 (was a number
+ *                                  before), so always compare it as a string.
  *   - Execution ID   (string)  -- Colon-separated path, e.g. "5:12:3".
  *                                  Used in backend progress messages and UNIQUE_ID.
  *   - Locator ID     (string)  -- "<uuid>:<localId>" for UI state (badges, errors).
@@ -80,16 +82,21 @@ export function getUniqueIdFromNode(node) {
  * Check if a node matches a colon-delimited execution ID from the backend.
  * Handles subgraph paths like "54:73" or "54:62:174".
  *
+ * All comparisons are done on strings: frontend 1.46 brands `node.id` as a
+ * string, so coercing the backend ID to a Number never matches. Object key
+ * lookup coerces to string anyway, so passing a string segment to
+ * `getNodeById` resolves on both old and new frontends.
+ *
  * @param {Object} node - The LiteGraph node to check.
  * @param {string|number} uniqueId - The execution ID (e.g., "54:73" or "73").
  * @returns {boolean} True if the node matches.
  */
 export function nodeMatchesUniqueId(node, uniqueId) {
-    const parts = String(uniqueId).split(":").map(Number);
+    const parts = String(uniqueId).split(":");
     const localId = parts.pop();
 
     // Quick exit: local ID must match.
-    if (localId !== node.id) return false;
+    if (localId !== String(node.id)) return false;
 
     // No prefix means node should be in root graph.
     if (parts.length === 0) {
@@ -128,7 +135,7 @@ export function findNodeByExecutionId(id, rootGraph) {
     let node = null;
 
     for (let i = 0; i < segments.length; i++) {
-        node = currentGraph.getNodeById(Number(segments[i]));
+        node = currentGraph.getNodeById(segments[i]);
         if (!node) return null;
         if (i < segments.length - 1) {
             if (!node.subgraph) return null;
