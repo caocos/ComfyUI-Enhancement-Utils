@@ -273,7 +273,7 @@ function updateDomBadge(node, text) {
         badge.className = "enhutils-profiler-badge";
         badge.style.cssText = [
             "position: absolute",
-            "bottom: -20px",
+            "top: 2px",
             "right: 8px",
             "background: #2B0954",
             "color: #fff",
